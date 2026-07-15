@@ -49,9 +49,10 @@ void UUIPanelLayout_Overlay::OnRebuildLayout()
             if (auto Slot = Cast<UUIPanelLayout_Overlay_Slot>(LayoutChild.LayoutInterface.Get()))
             {
                 if (Slot->GetIgnoreLayout())continue;
+                const FVector2D SlotDesiredSize = Slot->ComputeDesiredSize(LayoutChild.ChildUIItem.Get());
                 auto& Padding = Slot->GetPadding();
-                ChildWidthMax = FMath::Max(ChildWidthMax, (float)(Padding.Left + Padding.Right + Slot->GetDesiredSize().X));
-                ChildHeightMax = FMath::Max(ChildHeightMax, (float)(Padding.Top + Padding.Bottom + Slot->GetDesiredSize().Y));
+                ChildWidthMax = FMath::Max(ChildWidthMax, (float)(Padding.Left + Padding.Right + SlotDesiredSize.X));
+                ChildHeightMax = FMath::Max(ChildHeightMax, (float)(Padding.Top + Padding.Bottom + SlotDesiredSize.Y));
             }
         }
         if (bWidthFitToChildren)
@@ -74,6 +75,7 @@ void UUIPanelLayout_Overlay::OnRebuildLayout()
         if (auto Slot = Cast<UUIPanelLayout_Overlay_Slot>(LayoutChild.LayoutInterface.Get()))
         {
             if (Slot->GetIgnoreLayout())continue;
+            const FVector2D SlotDesiredSize = Slot->ComputeDesiredSize(LayoutChild.ChildUIItem.Get());
             auto& Padding = Slot->GetPadding();
             auto UIItem = LayoutChild.ChildUIItem.Get();
             float ItemAreaWidth = RectSize.X - (Padding.Left + Padding.Right);
@@ -81,8 +83,8 @@ void UUIPanelLayout_Overlay::OnRebuildLayout()
 
             auto HAlign = Slot->GetHorizontalAlignment();
             auto VAlign = Slot->GetVerticalAlignment();
-            float ItemWidth = Slot->GetDesiredSize().X;
-            float ItemHeight = Slot->GetDesiredSize().Y;
+            float ItemWidth = SlotDesiredSize.X;
+            float ItemHeight = SlotDesiredSize.Y;
             auto ItemOffsetX = 0.0f;
             auto ItemOffsetY = 0.0f;
             if (ItemWidth < ItemAreaWidth)
@@ -148,7 +150,7 @@ void UUIPanelLayout_Overlay::OnRebuildLayout()
             AnchorOffsetY += ItemOffsetY;
             //parent anchor
             AnchorOffsetX -= AnchorMin.X * RootUIComp->GetWidth();
-            AnchorOffsetY += AnchorMin.Y * RootUIComp->GetHeight();
+            AnchorOffsetY += (1.0f - AnchorMin.Y) * RootUIComp->GetHeight();//LGUI anchor Y is Unity-style (1 = top): offset from the anchor line UP to the parent top, which the cell math is relative to. Plain AnchorMin.Y only coincides at the 0.5 center anchor.
             ApplyAnchoredPositionWithAnimation(TempAnimationType, FVector2D(AnchorOffsetX, AnchorOffsetY), UIItem);
             ApplyWidthWithAnimation(TempAnimationType, ItemWidth, UIItem);
             ApplyHeightWithAnimation(TempAnimationType, ItemHeight, UIItem);

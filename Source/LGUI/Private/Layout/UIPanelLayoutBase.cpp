@@ -3,6 +3,52 @@
 #include "Layout/UIPanelLayoutBase.h"
 #include "LGUI.h"
 #include "Core/ActorComponent/UIItem.h"
+#include "Core/ActorComponent/UIText.h"
+#include "Core/ActorComponent/UISpriteBase.h"
+#include "Core/ActorComponent/UITextureBase.h"
+#include "Core/LGUISpriteData_BaseObject.h"
+#include "Engine/Texture.h"
+
+namespace UIPanelLayoutSlotLocal
+{
+	/** Natural content size of a UI element, UMG-desired-size style. False when the element has no measurable content. */
+	static bool MeasureContentSize(UUIItem* InChild, FVector2D& OutSize)
+	{
+		if (auto Text = Cast<UUIText>(InChild))
+		{
+			OutSize = Text->GetTextRealSize();
+			return true;
+		}
+		if (auto Sprite = Cast<UUISpriteBase>(InChild))
+		{
+			if (auto SpriteData = Sprite->GetSprite())
+			{
+				auto& SpriteInfo = SpriteData->GetSpriteInfo();
+				if (SpriteInfo.GetSourceWidth() > 0 && SpriteInfo.GetSourceHeight() > 0)
+				{
+					OutSize = FVector2D(SpriteInfo.GetSourceWidth(), SpriteInfo.GetSourceHeight());
+					return true;
+				}
+			}
+			return false;
+		}
+		if (auto Texture = Cast<UUITextureBase>(InChild))
+		{
+			if (auto TextureObject = Texture->GetTexture())
+			{
+				const float Width = TextureObject->GetSurfaceWidth();
+				const float Height = TextureObject->GetSurfaceHeight();
+				if (Width > 0 && Height > 0)
+				{
+					OutSize = FVector2D(Width, Height);
+					return true;
+				}
+			}
+			return false;
+		}
+		return false;
+	}
+}
 
 UUIPanelLayoutBase::UUIPanelLayoutBase()
 {
@@ -18,10 +64,63 @@ void UUIPanelLayoutBase::GetLayoutElement(UUIItem* InChild, UObject*& OutLayoutE
     {
         LayoutElement = NewObject<UUIPanelLayoutSlotBase>(const_cast<UUIPanelLayoutBase*>(this), GetPanelLayoutSlotClass(), NAME_None, RF_Public | RF_Transactional);
         LayoutElement->SetDesiredSize(FVector2D(InChild->GetWidth(), InChild->GetHeight()));
+        // measurable content (text/sprite/texture) starts in UMG mode: the slot follows the
+        // content's natural size. Existing slots come from serialized data and keep their mode.
+        FVector2D MeasuredSize;
+        if (UIPanelLayoutSlotLocal::MeasureContentSize(InChild, MeasuredSize))
+        {
+            LayoutElement->SetDesiredSizeMode(EUIPanelLayoutSlotDesiredSizeMode::AutoFromContent);
+        }
         MapChildToSlot.Add(InChild, LayoutElement);
     }
     OutLayoutElement = LayoutElement;
     OutIgnoreLayout = LayoutElement->GetIgnoreLayout();
+}
+
+void UUIPanelLayoutBase::OnUpdateLayout_Implementation()
+{
+	// AutoFromContent slots follow content that can change without any dimension event
+	// (e.g. editing overflow text keeps the UIItem size). The content components cache
+	// their measurements, so this per-frame compare is cheap.
+	for (auto& KeyValue : MapChildToSlot)
+	{
+		UUIItem* Child = KeyValue.Key;
+		UUIPanelLayoutSlotBase* Slot = KeyValue.Value;
+		if (Child == nullptr || Slot == nullptr)continue;
+		if (Slot->GetDesiredSizeMode() != EUIPanelLayoutSlotDesiredSizeMode::AutoFromContent)continue;
+		FVector2D MeasuredSize;
+		if (UIPanelLayoutSlotLocal::MeasureContentSize(Child, MeasuredSize)
+			&& Slot->UpdateMeasuredSizeCache(MeasuredSize))
+		{
+			MarkNeedRebuildLayout();
+		}
+	}
+	Super::OnUpdateLayout_Implementation();
+}
+
+FVector2D UUIPanelLayoutSlotBase::ComputeDesiredSize(UUIItem* InChild)const
+{
+	if (DesiredSizeMode == EUIPanelLayoutSlotDesiredSizeMode::AutoFromContent && InChild != nullptr)
+	{
+		FVector2D MeasuredSize;
+		if (UIPanelLayoutSlotLocal::MeasureContentSize(InChild, MeasuredSize))
+		{
+			return MeasuredSize;
+		}
+	}
+	return DesiredSize;
+}
+
+void UUIPanelLayoutSlotBase::SetDesiredSizeMode(EUIPanelLayoutSlotDesiredSizeMode Value)
+{
+	if (DesiredSizeMode != Value)
+	{
+		DesiredSizeMode = Value;
+		if (auto Layout = GetTypedOuter<UUIPanelLayoutBase>())
+		{
+			Layout->MarkNeedRebuildLayout();
+		}
+	}
 }
 void UUIPanelLayoutBase::RebuildChildrenList()const
 {

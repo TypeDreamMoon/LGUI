@@ -50,22 +50,23 @@ void UUIPanelLayout_VerticalBox::OnRebuildLayout()
         if (auto Slot = Cast<UUIPanelLayout_VerticalBox_Slot>(LayoutChild.LayoutInterface.Get()))
         {
             if (Slot->GetIgnoreLayout())continue;
+            const FVector2D SlotDesiredSize = Slot->ComputeDesiredSize(LayoutChild.ChildUIItem.Get());
             auto& Size = Slot->GetSizeRule();
             if (Size.SizeRule == ESlateSizeRule::Fill)
             {
                 TotalFillRatio += Size.Value;
-                TotalFillHeight += Slot->GetDesiredSize().Y;
+                TotalFillHeight += SlotDesiredSize.Y;
             }
             else
             {
-                TotalAutoHeight += Slot->GetDesiredSize().Y;
+                TotalAutoHeight += SlotDesiredSize.Y;
             }
             auto& Padding = Slot->GetPadding();
             TotalPaddingHeight += Padding.Top + Padding.Bottom;
 
             if (bWidthFitToChildren)
             {
-                auto WidthWithPadding = Padding.Left + Padding.Right + Slot->GetDesiredSize().X;
+                auto WidthWithPadding = Padding.Left + Padding.Right + SlotDesiredSize.X;
                 if (ChildWidthMin > WidthWithPadding)
                 {
                     ChildWidthMin = WidthWithPadding;
@@ -96,6 +97,7 @@ void UUIPanelLayout_VerticalBox::OnRebuildLayout()
         if (auto Slot = Cast<UUIPanelLayout_VerticalBox_Slot>(LayoutChild.LayoutInterface.Get()))
         {
             if (Slot->GetIgnoreLayout())continue;
+            const FVector2D SlotDesiredSize = Slot->ComputeDesiredSize(LayoutChild.ChildUIItem.Get());
             auto& Padding = Slot->GetPadding();
             auto UIItem = LayoutChild.ChildUIItem.Get();
             auto& Size = Slot->GetSizeRule();
@@ -107,12 +109,12 @@ void UUIPanelLayout_VerticalBox::OnRebuildLayout()
             }
             else
             {
-                ItemAreaHeight = Slot->GetDesiredSize().Y;
+                ItemAreaHeight = SlotDesiredSize.Y;
             }
             auto HAlign = Slot->GetHorizontalAlignment();
             auto VAlign = Slot->GetVerticalAlignment();
-            float ItemWidth = Slot->GetDesiredSize().X;
-            float ItemHeight = Slot->GetDesiredSize().Y;
+            float ItemWidth = SlotDesiredSize.X;
+            float ItemHeight = SlotDesiredSize.Y;
             auto ItemOffsetX = 0.0f;
             auto ItemOffsetY = 0.0f;
             if (ItemWidth < ItemAreaWidth)
@@ -178,7 +180,7 @@ void UUIPanelLayout_VerticalBox::OnRebuildLayout()
             AnchorOffsetY += ItemOffsetY;
             //parent anchor
             AnchorOffsetX -= AnchorMin.X * RootUIComp->GetWidth();
-            AnchorOffsetY += AnchorMin.Y * RootUIComp->GetHeight();
+            AnchorOffsetY += (1.0f - AnchorMin.Y) * RootUIComp->GetHeight();//LGUI anchor Y is Unity-style (1 = top): offset from the anchor line UP to the parent top, which the cell math is relative to. Plain AnchorMin.Y only coincides at the 0.5 center anchor.
             ApplyAnchoredPositionWithAnimation(TempAnimationType, FVector2D(AnchorOffsetX, AnchorOffsetY), UIItem);
             ApplyWidthWithAnimation(TempAnimationType, ItemWidth, UIItem);
             ApplyHeightWithAnimation(TempAnimationType, ItemHeight, UIItem);

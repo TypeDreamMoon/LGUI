@@ -8,6 +8,8 @@
 #include "LGUIPrefabEditorOutliner.h"
 #include "LGUIPrefabRawDataViewer.h"
 #include "SLGUIPrefabPalette.h"
+#include "LGUIPrefabBehaviourUtils.h"
+#include "Subsystems/AssetEditorSubsystem.h"
 #include "UnrealEdGlobals.h"
 #include "EditorModeManager.h"
 #include "EngineUtils.h"
@@ -1177,6 +1179,37 @@ void FLGUIPrefabEditor::OnApply()
 		// non-blocking scan for event bindings whose target no longer resolves
 		ValidateEventBindings();
 
+		// BindWidget-style pass over the behaviour blueprint's variables, BEFORE SavePrefab so
+		// new bindings are serialized: null Instance-Editable object properties bind to
+		// name-matching elements; dangling/ambiguous/unsavable bindings are reported
+		{
+			TArray<FString> BoundDetails;
+			TArray<FString> Problems;
+			LGUIPrefabBehaviourUtils::AutoBindAndValidate(PrefabHelperObject->LoadedRootActor, BoundDetails, Problems);
+			if (BoundDetails.Num() > 0 || Problems.Num() > 0)
+			{
+				// name every binding so silent mis-binds are visible at a glance
+				FString NotifyText;
+				for (auto& Detail : BoundDetails)
+				{
+					if (!NotifyText.IsEmpty())NotifyText += TEXT("\n");
+					NotifyText += TEXT("Auto-bound: ") + Detail;
+				}
+				for (auto& Problem : Problems)
+				{
+					if (!NotifyText.IsEmpty())NotifyText += TEXT("\n");
+					NotifyText += TEXT("Behaviour binding: ") + Problem;
+				}
+				FNotificationInfo Info(FText::FromString(NotifyText));
+				Info.ExpireDuration = 6.0f;
+				if (Problems.Num() > 0)
+				{
+					Info.Image = FAppStyle::GetBrush(TEXT("Icons.WarningWithColor"));
+				}
+				FSlateNotificationManager::Get().AddNotification(Info);
+			}
+		}
+
 		//save view location and rotation
 		auto ViewTransform = ViewportPtr->GetViewportClient()->GetViewTransform();
 		PrefabBeingEdited->PrefabDataForPrefabEditor.ViewLocation = ViewTransform.GetLocation();
@@ -1223,6 +1256,72 @@ void FLGUIPrefabEditor::OnApply()
 		}
 #endif
 	}
+}
+
+UBlueprint* FLGUIPrefabEditor::GetOrCreateBehaviourBlueprintChecked()
+{
+	AActor* RootActor = PrefabHelperObject != nullptr ? PrefabHelperObject->LoadedRootActor.Get() : nullptr;
+	if (RootActor == nullptr)return nullptr;
+	// a "variant" prefab whose root actor belongs to a sub prefab serializes that root as a
+	// prefab reference + overrides only -- a component attached here would be silently dropped
+	// on Apply. Refuse up front instead of losing the user's logic.
+	if (PrefabHelperObject->SubPrefabMap.Contains(RootActor))
+	{
+		FMessageDialog::Open(EAppMsgType::Ok, LOCTEXT("Error_BehaviourOnSubPrefabRoot", "This prefab's root actor belongs to a sub prefab, so a behaviour component attached here would not be saved. Open the source prefab and add the behaviour there."));
+		return nullptr;
+	}
+
+	UBlueprint* Blueprint = LGUIPrefabBehaviourUtils::FindBehaviourBlueprint(RootActor);
+	if (Blueprint == nullptr)
+	{
+		Blueprint = LGUIPrefabBehaviourUtils::CreateBehaviourBlueprint(PrefabBeingEdited, RootActor);
+		if (Blueprint == nullptr)
+		{
+			FMessageDialog::Open(EAppMsgType::Ok, LOCTEXT("Error_CreateBehaviourBlueprint", "Failed to create the behaviour blueprint."));
+			return nullptr;
+		}
+		// the attached logic-host component is part of the prefab now, regardless of what
+		// the caller does next -- otherwise closing without Apply orphans the new asset
+		PrefabHelperObject->SetAnythingDirty();
+
+		auto InfoText = FText::Format(LOCTEXT("BehaviourBlueprintCreated", "Created {0} and attached it to the prefab root.")
+			, FText::FromString(Blueprint->GetName()));
+		FNotificationInfo Info(InfoText);
+		Info.ExpireDuration = 5.0f;
+		FSlateNotificationManager::Get().AddNotification(Info);
+	}
+	return Blueprint;
+}
+
+void FLGUIPrefabEditor::CreateOrOpenBehaviourBlueprint()
+{
+	if (UBlueprint* Blueprint = GetOrCreateBehaviourBlueprintChecked())
+	{
+		GEditor->GetEditorSubsystem<UAssetEditorSubsystem>()->OpenEditorForAsset(Blueprint);
+	}
+}
+
+void FLGUIPrefabEditor::PromoteToBehaviourVariable(UObject* InTarget)
+{
+	if (InTarget == nullptr)return;
+	UBlueprint* Blueprint = GetOrCreateBehaviourBlueprintChecked();
+	if (Blueprint == nullptr)return;
+	AActor* RootActor = PrefabHelperObject->LoadedRootActor.Get();
+
+	const FString VariableName = LGUIPrefabBehaviourUtils::MakeVariableNameForTarget(InTarget);
+	FText Message;
+	const bool bSuccess = LGUIPrefabBehaviourUtils::PromoteToVariable(Blueprint, RootActor, InTarget, VariableName, Message);
+	if (bSuccess)
+	{
+		PrefabHelperObject->SetAnythingDirty();
+	}
+	FNotificationInfo Info(Message);
+	Info.ExpireDuration = 5.0f;
+	if (!bSuccess)
+	{
+		Info.Image = FAppStyle::GetBrush(TEXT("Icons.WarningWithColor"));
+	}
+	FSlateNotificationManager::Get().AddNotification(Info);
 }
 
 void FLGUIPrefabEditor::OnOpenRawDataViewerPanel()
@@ -1292,6 +1391,12 @@ void FLGUIPrefabEditor::BindCommands()
 	ToolkitCommands->MapAction(
 		PrefabEditorCommands.OpenPrefabHelperObject,
 		FExecuteAction::CreateSP(this, &FLGUIPrefabEditor::OnOpenPrefabHelperObjectDetailsPanel),
+		FCanExecuteAction(),
+		FIsActionChecked()
+	);
+	ToolkitCommands->MapAction(
+		PrefabEditorCommands.OpenBehaviourBlueprint,
+		FExecuteAction::CreateSP(this, &FLGUIPrefabEditor::CreateOrOpenBehaviourBlueprint),
 		FCanExecuteAction(),
 		FIsActionChecked()
 	);
@@ -1422,6 +1527,9 @@ void FLGUIPrefabEditor::ExtendToolbar()
 
 		FToolMenuSection& Section = ToolBar->AddSection("LGUIPrefabCommands", TAttribute<FText>(), InsertAfterAssetSection);
 		Section.AddEntry(ApplyButtonMenuEntry);
+		Section.AddEntry(FToolMenuEntry::InitToolBarButton(FLGUIPrefabEditorCommand::Get().OpenBehaviourBlueprint
+			, TAttribute<FText>(), TAttribute<FText>()
+			, FSlateIcon(FAppStyle::GetAppStyleSetName(), "Icons.Blueprints")));
 		Section.AddEntry(FToolMenuEntry::InitToolBarButton(FLGUIPrefabEditorCommand::Get().RawDataViewer));
 		Section.AddEntry(FToolMenuEntry::InitToolBarButton(FLGUIPrefabEditorCommand::Get().OpenPrefabHelperObject));
 	}

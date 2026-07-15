@@ -28,6 +28,7 @@ public:
 	TSharedPtr<FUICommandInfo> Apply;
 	TSharedPtr<FUICommandInfo> RawDataViewer;
 	TSharedPtr<FUICommandInfo> OpenPrefabHelperObject;
+	TSharedPtr<FUICommandInfo> OpenBehaviourBlueprint;
 	TSharedPtr<FUICommandInfo> CopyActor;
 	TSharedPtr<FUICommandInfo> PasteActor;
 	TSharedPtr<FUICommandInfo> CutActor;

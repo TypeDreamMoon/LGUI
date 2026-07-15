@@ -119,6 +119,28 @@ public:
 	 */
 	void ValidateEventBindings();
 
+	/**
+	 * UMG-WidgetBlueprint-style logic host: open the prefab's companion behaviour blueprint
+	 * (a ULGUILifeCycleBehaviour subclass attached to the prefab root), creating and attaching
+	 * "BP_<PrefabName>" next to the prefab asset if there is none yet.
+	 */
+	void CreateOrOpenBehaviourBlueprint();
+	/**
+	 * UMG "Is Variable" counterpart: add a member variable to the companion behaviour blueprint
+	 * (creating the blueprint first if needed) typed to InTarget's class, and bind it to InTarget.
+	 * The reference is serialized with the prefab (GUID-remapped), so it survives renames and
+	 * needs no runtime lookup.
+	 */
+	void PromoteToBehaviourVariable(UObject* InTarget);
+private:
+	/**
+	 * Shared entry guard for the behaviour workflow: refuses variant prefabs (root actor
+	 * belongs to a sub prefab, where an attached component would not be saved), finds the
+	 * companion blueprint or creates + attaches it (marking the prefab dirty). Null on refusal.
+	 */
+	class UBlueprint* GetOrCreateBehaviourBlueprintChecked();
+public:
+
 	static FLGUIPrefabEditor* GetEditorForPrefabIfValid(ULGUIPrefab* InPrefab);
 	static ULGUIPrefabHelperObject* GetEditorPrefabHelperObjectForActor(AActor* InActor);
 	static bool WorldIsPrefabEditor(UWorld* InWorld);

@@ -39,6 +39,7 @@ public class LGUIEditor : ModuleRules
                 "SceneOutliner",//LGUIPrefab editor, extend SceneOutliner
                 "ApplicationCore",//ClipboardCopy
                 "KismetCompiler",
+                "BlueprintGraph",//UEdGraphSchema_K2 pin categories (behaviour variable promote)
                 "AppFramework",
                 "AssetRegistry",//PrefabPalette, enumerate prefab assets
                 //"InputCore",
