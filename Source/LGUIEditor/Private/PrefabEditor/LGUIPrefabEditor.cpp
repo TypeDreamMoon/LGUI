@@ -21,6 +21,8 @@
 #include "ScopedTransaction.h"
 #include "Core/ActorComponent/UIItem.h"
 #include "Event/LGUIEventDelegate.h"
+#include "PrefabSystem/LGUIPrefabSettings.h"
+#include "Misc/FileHelper.h"
 #include "LGUIPrefabEditorCommand.h"
 #include "Framework/Commands/GenericCommands.h"
 #include "Framework/MultiBox/MultiBoxExtender.h"
@@ -201,6 +203,108 @@ bool FLGUIPrefabEditor::HasSelectionInThisWorld()const
 		}
 	}
 	return false;
+}
+
+namespace LGUIPrefabTextSnapshotLocal
+{
+	static void AppendObjectProperties(FString& Out, UObject* Object, int32 Indent)
+	{
+		const FString IndentStr = FString::ChrN(Indent, TEXT('\t'));
+		UObject* CDO = Object->GetClass()->GetDefaultObject();
+		// stable order: property name
+		TArray<FProperty*> Properties;
+		for (TFieldIterator<FProperty> It(Object->GetClass()); It; ++It)
+		{
+			if (It->HasAnyPropertyFlags(CPF_Transient | CPF_DuplicateTransient | CPF_NonPIEDuplicateTransient | CPF_Deprecated))continue;
+			if (It->IsA<FMulticastDelegateProperty>() || It->IsA<FDelegateProperty>())continue;
+			Properties.Add(*It);
+		}
+		Properties.Sort([](const FProperty& A, const FProperty& B) { return A.GetFName().LexicalLess(B.GetFName()); });
+		for (auto& Property : Properties)
+		{
+			// only export values that differ from the class default -- that IS the diff
+			if (Property->Identical_InContainer(Object, CDO))continue;
+			FString ValueText;
+			Property->ExportTextItem_InContainer(ValueText, Object, CDO, nullptr, PPF_SimpleObjectText);
+			Out += FString::Printf(TEXT("%s%s = %s\n"), *IndentStr, *Property->GetName(), *ValueText);
+		}
+	}
+
+	static void AppendActorRecursive(FString& Out, AActor* Actor, ULGUIPrefabHelperObject* HelperObject, int32 Indent)
+	{
+		const FString IndentStr = FString::ChrN(Indent, TEXT('\t'));
+
+		// sub prefab root: reference + overrides, don't expand its internals (they belong to the sub asset)
+		if (HelperObject->SubPrefabMap.Contains(Actor))
+		{
+			const FLGUISubPrefabData& SubPrefabData = HelperObject->SubPrefabMap[Actor];
+			Out += FString::Printf(TEXT("%sSubPrefab \"%s\" <%s>\n"), *IndentStr, *Actor->GetActorLabel()
+				, SubPrefabData.PrefabAsset != nullptr ? *SubPrefabData.PrefabAsset->GetPathName() : TEXT("MISSING"));
+			// stable order for overrides: object name + sorted property names
+			TArray<FString> OverrideLines;
+			for (auto& Item : SubPrefabData.ObjectOverrideParameterArray)
+			{
+				if (!Item.Object.IsValid())continue;
+				TArray<FName> Names = Item.MemberPropertyNames;
+				Names.Sort([](const FName& A, const FName& B) { return A.LexicalLess(B); });
+				for (auto& Name : Names)
+				{
+					OverrideLines.Add(FString::Printf(TEXT("%s\tOverride %s.%s\n"), *IndentStr, *Item.Object->GetName(), *Name.ToString()));
+				}
+			}
+			OverrideLines.Sort();
+			for (auto& Line : OverrideLines)
+			{
+				Out += Line;
+			}
+			return;
+		}
+
+		Out += FString::Printf(TEXT("%sActor \"%s\" (%s)\n"), *IndentStr, *Actor->GetActorLabel(), *Actor->GetClass()->GetName());
+		AppendObjectProperties(Out, Actor, Indent + 1);
+		// components in stable name order
+		TArray<UActorComponent*> Components;
+		for (UActorComponent* Comp : Actor->GetComponents())
+		{
+			if (Comp != nullptr && !Comp->IsVisualizationComponent())Components.Add(Comp);
+		}
+		Components.Sort([](const UActorComponent& A, const UActorComponent& B) { return A.GetFName().LexicalLess(B.GetFName()); });
+		for (auto& Comp : Components)
+		{
+			Out += FString::Printf(TEXT("%s\tComponent \"%s\" (%s)\n"), *IndentStr, *Comp->GetName(), *Comp->GetClass()->GetName());
+			AppendObjectProperties(Out, Comp, Indent + 2);
+		}
+		// children in stable label order (hierarchyIndex is itself a property and already exported)
+		TArray<AActor*> ChildActors;
+		Actor->GetAttachedActors(ChildActors);
+		ChildActors.Sort([](const AActor& A, const AActor& B) { return A.GetActorLabel() < B.GetActorLabel(); });
+		for (auto& Child : ChildActors)
+		{
+			AppendActorRecursive(Out, Child, HelperObject, Indent + 1);
+		}
+	}
+}
+
+void FLGUIPrefabEditor::ExportTextSnapshot()
+{
+	if (!IsValid(PrefabHelperObject->LoadedRootActor))return;
+
+	FString Content;
+	Content += FString::Printf(TEXT("// LGUI prefab text snapshot -- generated on Apply for diff/review, not used at load time.\n// Asset: %s\n\n"), *PrefabBeingEdited->GetPathName());
+	LGUIPrefabTextSnapshotLocal::AppendActorRecursive(Content, PrefabHelperObject->LoadedRootActor, PrefabHelperObject, 0);
+
+	// mirror the asset's package path under <Project>/PrefabTextSnapshots/
+	FString PackageName = PrefabBeingEdited->GetOutermost()->GetName();// e.g. /Game/UI/BP_SettingsPanel
+	PackageName.RemoveFromStart(TEXT("/"));
+	const FString FilePath = FPaths::ProjectDir() / TEXT("PrefabTextSnapshots") / PackageName + TEXT(".txt");
+	if (FFileHelper::SaveStringToFile(Content, *FilePath, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))
+	{
+		UE_LOG(LGUIEditor, Log, TEXT("[LGUI Prefab] text snapshot saved: %s"), *FilePath);
+	}
+	else
+	{
+		UE_LOG(LGUIEditor, Warning, TEXT("[LGUI Prefab] failed to save text snapshot: %s"), *FilePath);
+	}
 }
 
 FLGUIPrefabEditor* FLGUIPrefabEditor::GetEditorForPrefabIfValid(ULGUIPrefab* InPrefab)
@@ -995,6 +1099,14 @@ void FLGUIPrefabEditor::OnApply()
 		PrefabHelperObject->SavePrefab();
 		LGUIEditorTools::RefreshLevelLoadedPrefab(PrefabHelperObject->PrefabAsset);
 		LGUIEditorTools::RefreshOnSubPrefabChange(PrefabHelperObject->PrefabAsset);
+
+		// optional diffable text snapshot alongside the (binary, un-diffable) asset
+#if WITH_EDITORONLY_DATA
+		if (GetDefault<ULGUIPrefabSettings>()->bExportTextSnapshotOnApply)
+		{
+			ExportTextSnapshot();
+		}
+#endif
 	}
 }
 

@@ -172,4 +172,11 @@ private:
 	 */
 	void RestrictSelectionToThisWorld();
 	bool HasSelectionInThisWorld()const;
+	/**
+	 * Export a stable, human-readable text snapshot of the live actor tree (hierarchy +
+	 * non-default properties; sub prefabs as references with their override list) to
+	 * <Project>/PrefabTextSnapshots/<asset path>.txt -- prefab binary can't be diffed,
+	 * this can. Gated by ULGUIPrefabSettings::bExportTextSnapshotOnApply.
+	 */
+	void ExportTextSnapshot();
 };
