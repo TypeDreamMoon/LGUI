@@ -165,4 +165,11 @@ private:
 	void OnOutlinerPickedChanged(AActor* Actor);
 	void OnOutlinerActorDoubleClick(AActor* Actor);
 	void HandleUndoRedo();
+	/**
+	 * Editor-scope isolation for clipboard commands: deselect actors that belong to other worlds
+	 * (other prefab editors / the level editor) so the shared static tools only see this editor's
+	 * selection, and paste lands in this world instead of wherever a stray selection points.
+	 */
+	void RestrictSelectionToThisWorld();
+	bool HasSelectionInThisWorld()const;
 };

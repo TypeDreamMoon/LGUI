@@ -165,6 +165,44 @@ void FLGUIPrefabEditor::HandleUndoRedo()
 	}
 }
 
+void FLGUIPrefabEditor::RestrictSelectionToThisWorld()
+{
+	TArray<AActor*> ActorsToDeselect;
+	for (FSelectionIterator It(GEditor->GetSelectedActorIterator()); It; ++It)
+	{
+		if (AActor* Actor = Cast<AActor>(*It))
+		{
+			if (Actor->GetWorld() != PreviewScene.GetWorld())
+			{
+				ActorsToDeselect.Add(Actor);
+			}
+		}
+	}
+	if (ActorsToDeselect.Num() > 0)
+	{
+		for (auto& Actor : ActorsToDeselect)
+		{
+			GEditor->SelectActor(Actor, false, false);
+		}
+		GEditor->NoteSelectionChange();
+	}
+}
+
+bool FLGUIPrefabEditor::HasSelectionInThisWorld()const
+{
+	for (FSelectionIterator It(GEditor->GetSelectedActorIterator()); It; ++It)
+	{
+		if (AActor* Actor = Cast<AActor>(*It))
+		{
+			if (Actor->GetWorld() == PreviewScene.GetWorld())
+			{
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
 FLGUIPrefabEditor* FLGUIPrefabEditor::GetEditorForPrefabIfValid(ULGUIPrefab* InPrefab)
 {
 	for (auto Instance : LGUIPrefabEditorInstanceCollection)
@@ -1033,36 +1071,47 @@ void FLGUIPrefabEditor::BindCommands()
 
 	ToolkitCommands->MapAction(
 		PrefabEditorCommands.CopyActor,
-		FExecuteAction::CreateStatic(&LGUIEditorTools::CopySelectedActors_Impl),
-		FCanExecuteAction::CreateStatic(&LGUIEditorTools::CanCopyActor),
+		FExecuteAction::CreateLambda([this]() { RestrictSelectionToThisWorld(); LGUIEditorTools::CopySelectedActors_Impl(); }),
+		FCanExecuteAction::CreateSP(this, &FLGUIPrefabEditor::HasSelectionInThisWorld),
 		FGetActionCheckState(),
 		FIsActionButtonVisible::CreateStatic(&LGUIEditorTools::CanCopyActor)
 	);
 	ToolkitCommands->MapAction(
 		PrefabEditorCommands.CutActor,
-		FExecuteAction::CreateStatic(&LGUIEditorTools::CutSelectedActors_Impl),
-		FCanExecuteAction::CreateStatic(&LGUIEditorTools::CanCutActor),
+		FExecuteAction::CreateLambda([this]() { RestrictSelectionToThisWorld(); LGUIEditorTools::CutSelectedActors_Impl(); }),
+		FCanExecuteAction::CreateSP(this, &FLGUIPrefabEditor::HasSelectionInThisWorld),
 		FGetActionCheckState(),
 		FIsActionButtonVisible::CreateStatic(&LGUIEditorTools::CanCutActor)
 	);
 	ToolkitCommands->MapAction(
 		PrefabEditorCommands.PasteActor,
-		FExecuteAction::CreateStatic(&LGUIEditorTools::PasteSelectedActors_Impl),
+		FExecuteAction::CreateLambda([this]()
+			{
+				// paste target world = "world of the current selection", so restrict first; with no
+				// selection in this world, select the prefab root so paste lands HERE instead of
+				// falling back to the level
+				RestrictSelectionToThisWorld();
+				if (!HasSelectionInThisWorld() && IsValid(PrefabHelperObject->LoadedRootActor))
+				{
+					GEditor->SelectActor(PrefabHelperObject->LoadedRootActor, true, true);
+				}
+				LGUIEditorTools::PasteSelectedActors_Impl();
+			}),
 		FCanExecuteAction::CreateStatic(&LGUIEditorTools::CanPasteActor),
 		FGetActionCheckState(),
 		FIsActionButtonVisible::CreateStatic(&LGUIEditorTools::CanPasteActor)
 	);
 	ToolkitCommands->MapAction(
 		PrefabEditorCommands.DuplicateActor,
-		FExecuteAction::CreateStatic(&LGUIEditorTools::DuplicateSelectedActors_Impl),
-		FCanExecuteAction::CreateStatic(&LGUIEditorTools::CanDuplicateActor),
+		FExecuteAction::CreateLambda([this]() { RestrictSelectionToThisWorld(); LGUIEditorTools::DuplicateSelectedActors_Impl(); }),
+		FCanExecuteAction::CreateSP(this, &FLGUIPrefabEditor::HasSelectionInThisWorld),
 		FGetActionCheckState(),
 		FIsActionButtonVisible::CreateStatic(&LGUIEditorTools::CanDuplicateActor)
 	);
 	ToolkitCommands->MapAction(
 		PrefabEditorCommands.DestroyActor,
-		FExecuteAction::CreateStatic(&LGUIEditorTools::DeleteSelectedActors_Impl),
-		FCanExecuteAction::CreateStatic(&LGUIEditorTools::CanDeleteActor),
+		FExecuteAction::CreateLambda([this]() { RestrictSelectionToThisWorld(); LGUIEditorTools::DeleteSelectedActors_Impl(); }),
+		FCanExecuteAction::CreateSP(this, &FLGUIPrefabEditor::HasSelectionInThisWorld),
 		FGetActionCheckState(),
 		FIsActionButtonVisible::CreateStatic(&LGUIEditorTools::CanDeleteActor)
 	);
@@ -1100,23 +1149,31 @@ void FLGUIPrefabEditor::BindCommands()
 	// with the level editor. Text fields still consume Ctrl+C first (focused-widget priority).
 	ToolkitCommands->MapAction(
 		FGenericCommands::Get().Copy,
-		FExecuteAction::CreateStatic(&LGUIEditorTools::CopySelectedActors_Impl),
-		FCanExecuteAction::CreateStatic(&LGUIEditorTools::CanCopyActor)
+		FExecuteAction::CreateLambda([this]() { RestrictSelectionToThisWorld(); LGUIEditorTools::CopySelectedActors_Impl(); }),
+		FCanExecuteAction::CreateSP(this, &FLGUIPrefabEditor::HasSelectionInThisWorld)
 	);
 	ToolkitCommands->MapAction(
 		FGenericCommands::Get().Paste,
-		FExecuteAction::CreateStatic(&LGUIEditorTools::PasteSelectedActors_Impl),
+		FExecuteAction::CreateLambda([this]()
+			{
+				RestrictSelectionToThisWorld();
+				if (!HasSelectionInThisWorld() && IsValid(PrefabHelperObject->LoadedRootActor))
+				{
+					GEditor->SelectActor(PrefabHelperObject->LoadedRootActor, true, true);
+				}
+				LGUIEditorTools::PasteSelectedActors_Impl();
+			}),
 		FCanExecuteAction::CreateStatic(&LGUIEditorTools::CanPasteActor)
 	);
 	ToolkitCommands->MapAction(
 		FGenericCommands::Get().Cut,
-		FExecuteAction::CreateStatic(&LGUIEditorTools::CutSelectedActors_Impl),
-		FCanExecuteAction::CreateStatic(&LGUIEditorTools::CanCutActor)
+		FExecuteAction::CreateLambda([this]() { RestrictSelectionToThisWorld(); LGUIEditorTools::CutSelectedActors_Impl(); }),
+		FCanExecuteAction::CreateSP(this, &FLGUIPrefabEditor::HasSelectionInThisWorld)
 	);
 	ToolkitCommands->MapAction(
 		FGenericCommands::Get().Duplicate,
-		FExecuteAction::CreateStatic(&LGUIEditorTools::DuplicateSelectedActors_Impl),
-		FCanExecuteAction::CreateStatic(&LGUIEditorTools::CanDuplicateActor)
+		FExecuteAction::CreateLambda([this]() { RestrictSelectionToThisWorld(); LGUIEditorTools::DuplicateSelectedActors_Impl(); }),
+		FCanExecuteAction::CreateSP(this, &FLGUIPrefabEditor::HasSelectionInThisWorld)
 	);
 }
 void FLGUIPrefabEditor::ExtendToolbar()
