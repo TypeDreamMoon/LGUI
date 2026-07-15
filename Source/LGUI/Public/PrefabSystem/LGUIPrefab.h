@@ -213,6 +213,10 @@ public:
 	UPROPERTY(EditAnywhere, AssetRegistrySearchable, Category = "LGUI")
 		bool bHideInPalette = false;
 #endif
+#if WITH_EDITOR
+	/** Asset validation (save-time feedback + DataValidation commandlet in CI). */
+	virtual EDataValidationResult IsDataValid(class FDataValidationContext& Context) const override;
+#endif
 	/** Prefab system's version when creating this prefab */
 	UPROPERTY()
 		uint16 PrefabVersion;

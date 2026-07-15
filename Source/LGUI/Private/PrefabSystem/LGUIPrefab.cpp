@@ -18,8 +18,47 @@
 #include "PrefabSystem/LGUIPrefabManager.h"
 #include "PrefabSystem/LGUIPrefabHelperObject.h"
 #include "Engine/Engine.h"
+#if WITH_EDITOR
+#include "Misc/DataValidation.h"
+#endif
 
 #define LOCTEXT_NAMESPACE "LGUIPrefab"
+
+#if WITH_EDITOR
+EDataValidationResult ULGUIPrefab::IsDataValid(FDataValidationContext& Context) const
+{
+	EDataValidationResult Result = Super::IsDataValid(Context);
+
+	if (BinaryData.Num() == 0)
+	{
+		Context.AddError(LOCTEXT("DataValidation_NoBinaryData", "Prefab has no serialized data. Re-create it, or open and Apply if the asset still loads."));
+		Result = EDataValidationResult::Invalid;
+	}
+	if (PrefabVersion <= (uint16)ELGUIPrefabVersion::OldVersion)
+	{
+		Context.AddWarning(LOCTEXT("DataValidation_OldVersion", "Prefab was saved with an unsupported old serializer version. Open it in the Prefab Editor and hit Apply/Save to upgrade."));
+		if (Result != EDataValidationResult::Invalid)
+		{
+			Result = EDataValidationResult::Valid;
+		}
+	}
+	if (ReferenceClassList.Contains(nullptr))
+	{
+		Context.AddError(LOCTEXT("DataValidation_MissingClass", "Prefab references a class that no longer exists (null entry in ReferenceClassList). Deserialization will lose those objects."));
+		Result = EDataValidationResult::Invalid;
+	}
+	if (ReferenceAssetList.Contains(nullptr))
+	{
+		Context.AddWarning(LOCTEXT("DataValidation_MissingAsset", "Prefab references an asset that no longer exists (null entry in ReferenceAssetList)."));
+	}
+
+	if (Result == EDataValidationResult::NotValidated)
+	{
+		Result = EDataValidationResult::Valid;
+	}
+	return Result;
+}
+#endif
 
 
 FLGUISubPrefabData::FLGUISubPrefabData()

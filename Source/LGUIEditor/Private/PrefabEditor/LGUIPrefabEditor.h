@@ -100,6 +100,13 @@ public:
 	/** Selected UUIItem roots in this editor's world (root agent excluded). */
 	TArray<class UUIItem*> GetSelectedUIItems()const;
 
+	/**
+	 * Scan every FLGUIEventDelegate on the live actor tree and warn (notification) about bindings
+	 * whose target no longer resolves (renamed component, deleted function). Bindings locate their
+	 * target by actor + component NAME + function NAME, so renames break them silently at runtime.
+	 */
+	void ValidateEventBindings();
+
 	static FLGUIPrefabEditor* GetEditorForPrefabIfValid(ULGUIPrefab* InPrefab);
 	static ULGUIPrefabHelperObject* GetEditorPrefabHelperObjectForActor(AActor* InActor);
 	static bool WorldIsPrefabEditor(UWorld* InWorld);

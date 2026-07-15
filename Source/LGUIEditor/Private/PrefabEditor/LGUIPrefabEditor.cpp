@@ -20,6 +20,7 @@
 #include "Misc/FeedbackContext.h"
 #include "ScopedTransaction.h"
 #include "Core/ActorComponent/UIItem.h"
+#include "Event/LGUIEventDelegate.h"
 #include "LGUIPrefabEditorCommand.h"
 #include "Framework/Commands/GenericCommands.h"
 #include "Framework/MultiBox/MultiBoxExtender.h"
@@ -760,6 +761,123 @@ void FLGUIPrefabEditor::DistributeSelectedUIItems(bool bHorizontal)
 	}
 }
 
+void FLGUIPrefabEditor::ValidateEventBindings()
+{
+	// FLGUIEventDelegateData's fields are private; read them via UPROPERTY reflection.
+	// (Its editor-only CheckFunctionParameter() dereferences the Transient TargetObject
+	// without a null check, so it is unsafe to call from a cold scan like this one.)
+	auto DataStruct = FLGUIEventDelegateData::StaticStruct();
+	auto HelperActorProp = CastField<FObjectProperty>(DataStruct->FindPropertyByName(TEXT("HelperActor")));
+	auto HelperClassProp = CastField<FObjectProperty>(DataStruct->FindPropertyByName(TEXT("HelperClass")));
+	auto HelperComponentNameProp = CastField<FNameProperty>(DataStruct->FindPropertyByName(TEXT("HelperComponentName")));
+	auto FunctionNameProp = CastField<FNameProperty>(DataStruct->FindPropertyByName(TEXT("functionName")));
+	if (!HelperActorProp || !HelperClassProp || !HelperComponentNameProp || !FunctionNameProp)return;
+
+	TArray<FString> BrokenBindings;
+	auto CheckDelegateData = [&](const void* DataPtr, AActor* OwnerActor, UObject* OwnerObject, const FString& EventPropertyName)
+	{
+		AActor* HelperActor = Cast<AActor>(HelperActorProp->GetObjectPropertyValue_InContainer(DataPtr));
+		const FName FunctionName = FunctionNameProp->GetPropertyValue_InContainer(DataPtr);
+		if (HelperActor == nullptr && FunctionName.IsNone())
+		{
+			return;//empty (not yet configured) entry -- not worth warning about
+		}
+		FString Reason;
+		if (HelperActor == nullptr)
+		{
+			Reason = TEXT("target actor is missing");
+		}
+		else
+		{
+			// resolve the target the same way the runtime does: actor itself, or component by class (+name when ambiguous)
+			UObject* Target = HelperActor;
+			UClass* HelperClass = Cast<UClass>(HelperClassProp->GetObjectPropertyValue_InContainer(DataPtr));
+			if (HelperClass != nullptr && HelperClass != AActor::StaticClass() && HelperClass->IsChildOf(UActorComponent::StaticClass()))
+			{
+				const FName HelperComponentName = HelperComponentNameProp->GetPropertyValue_InContainer(DataPtr);
+				TArray<UActorComponent*> Components;
+				HelperActor->GetComponents(HelperClass, Components);
+				if (Components.Num() == 1)
+				{
+					Target = Components[0];
+				}
+				else if (Components.Num() > 1)
+				{
+					Target = nullptr;
+					for (auto& Comp : Components)
+					{
+						if (Comp->GetFName() == HelperComponentName)
+						{
+							Target = Comp;
+							break;
+						}
+					}
+					if (Target == nullptr)
+					{
+						Reason = FString::Printf(TEXT("component \"%s\" not found (renamed?)"), *HelperComponentName.ToString());
+					}
+				}
+				else
+				{
+					Target = nullptr;
+					Reason = FString::Printf(TEXT("no %s component on target actor"), *HelperClass->GetName());
+				}
+			}
+			if (Target != nullptr)
+			{
+				if (FunctionName.IsNone() || Target->FindFunction(FunctionName) == nullptr)
+				{
+					Reason = FString::Printf(TEXT("function \"%s\" not found"), *FunctionName.ToString());
+				}
+			}
+		}
+		if (!Reason.IsEmpty())
+		{
+			BrokenBindings.Add(FString::Printf(TEXT("%s > %s > %s: %s")
+				, *OwnerActor->GetActorLabel(), *OwnerObject->GetName(), *EventPropertyName, *Reason));
+		}
+	};
+
+	static const FName EventListName(TEXT("eventList"));
+	auto EventListProp = CastField<FArrayProperty>(FLGUIEventDelegate::StaticStruct()->FindPropertyByName(EventListName));
+	if (!EventListProp)return;
+
+	for (AActor* Actor : GetAllActors())
+	{
+		TArray<UObject*, TInlineAllocator<16>> ObjectsToScan;
+		ObjectsToScan.Add(Actor);
+		for (UActorComponent* Comp : Actor->GetComponents())
+		{
+			if (Comp)ObjectsToScan.Add(Comp);
+		}
+		for (UObject* Object : ObjectsToScan)
+		{
+			for (TFieldIterator<FStructProperty> PropIt(Object->GetClass()); PropIt; ++PropIt)
+			{
+				if (PropIt->Struct != FLGUIEventDelegate::StaticStruct())continue;
+				const void* DelegatePtr = PropIt->ContainerPtrToValuePtr<void>(Object);
+				FScriptArrayHelper ArrayHelper(EventListProp, EventListProp->ContainerPtrToValuePtr<void>(DelegatePtr));
+				for (int i = 0; i < ArrayHelper.Num(); i++)
+				{
+					CheckDelegateData(ArrayHelper.GetRawPtr(i), Actor, Object, PropIt->GetName());
+				}
+			}
+		}
+	}
+
+	if (BrokenBindings.Num() > 0)
+	{
+		FString Combined = FString::Join(BrokenBindings, TEXT("\n"));
+		FNotificationInfo Info(FText::Format(
+			LOCTEXT("BrokenEventBindings", "{0} broken event binding(s) in this prefab:\n{1}")
+			, BrokenBindings.Num(), FText::FromString(Combined)));
+		Info.ExpireDuration = 10.0f;
+		Info.bUseLargeFont = false;
+		FSlateNotificationManager::Get().AddNotification(Info);
+		UE_LOG(LGUIEditor, Warning, TEXT("[LGUI Prefab] Broken event bindings in %s:\n%s"), *PrefabBeingEdited->GetPathName(), *Combined);
+	}
+}
+
 void FLGUIPrefabEditor::DeleteSelectedActors_KeepChildren()
 {
 	TArray<TWeakObjectPtr<AActor>> SelectedActors;
@@ -799,6 +917,9 @@ void FLGUIPrefabEditor::OnApply()
 {
 	if (CheckBeforeSaveAsset())
 	{
+		// non-blocking scan for event bindings whose target no longer resolves
+		ValidateEventBindings();
+
 		//save view location and rotation
 		auto ViewTransform = ViewportPtr->GetViewportClient()->GetViewTransform();
 		PrefabBeingEdited->PrefabDataForPrefabEditor.ViewLocation = ViewTransform.GetLocation();
