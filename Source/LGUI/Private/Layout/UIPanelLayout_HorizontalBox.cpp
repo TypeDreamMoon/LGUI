@@ -178,7 +178,7 @@ void UUIPanelLayout_HorizontalBox::OnRebuildLayout()
             AnchorOffsetY += ItemOffsetY;
             //parent anchor
             AnchorOffsetX -= AnchorMin.X * RootUIComp->GetWidth();
-            AnchorOffsetY += AnchorMin.Y * RootUIComp->GetHeight();
+            AnchorOffsetY += (1.0f - AnchorMin.Y) * RootUIComp->GetHeight();//LGUI anchor Y is Unity-style (1 = top): offset from the anchor line UP to the parent top, which the cell math is relative to. Plain AnchorMin.Y only coincides at the 0.5 center anchor.
             ApplyAnchoredPositionWithAnimation(TempAnimationType, FVector2D(AnchorOffsetX, AnchorOffsetY), UIItem);
             ApplyWidthWithAnimation(TempAnimationType, ItemWidth, UIItem);
             ApplyHeightWithAnimation(TempAnimationType, ItemHeight, UIItem);
