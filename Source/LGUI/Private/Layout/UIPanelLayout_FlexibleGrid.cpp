@@ -112,6 +112,7 @@ void UUIPanelLayout_FlexibleGrid::OnRebuildLayout()
         if (auto Slot = Cast<UUIPanelLayout_FlexibleGrid_Slot>(LayoutChild.LayoutInterface.Get()))
         {
             if (Slot->GetIgnoreLayout())continue;
+            const FVector2D SlotDesiredSize = Slot->ComputeDesiredSize(LayoutChild.ChildUIItem.Get());
             auto& Padding = Slot->GetPadding();
             auto UIItem = LayoutChild.ChildUIItem.Get();
 
@@ -148,8 +149,8 @@ void UUIPanelLayout_FlexibleGrid::OnRebuildLayout()
             GetOffset(Slot->GetColumn(), Slot->GetRow(), PosX, PosY);
             auto HAlign = Slot->GetHorizontalAlignment();
             auto VAlign = Slot->GetVerticalAlignment();
-            float ItemWidth = Slot->GetDesiredSize().X;
-            float ItemHeight = Slot->GetDesiredSize().Y;
+            float ItemWidth = SlotDesiredSize.X;
+            float ItemHeight = SlotDesiredSize.Y;
             auto ItemOffsetX = 0.0f;
             auto ItemOffsetY = 0.0f;
             if (ItemWidth < ItemAreaWidth)

@@ -49,9 +49,10 @@ void UUIPanelLayout_Overlay::OnRebuildLayout()
             if (auto Slot = Cast<UUIPanelLayout_Overlay_Slot>(LayoutChild.LayoutInterface.Get()))
             {
                 if (Slot->GetIgnoreLayout())continue;
+                const FVector2D SlotDesiredSize = Slot->ComputeDesiredSize(LayoutChild.ChildUIItem.Get());
                 auto& Padding = Slot->GetPadding();
-                ChildWidthMax = FMath::Max(ChildWidthMax, (float)(Padding.Left + Padding.Right + Slot->GetDesiredSize().X));
-                ChildHeightMax = FMath::Max(ChildHeightMax, (float)(Padding.Top + Padding.Bottom + Slot->GetDesiredSize().Y));
+                ChildWidthMax = FMath::Max(ChildWidthMax, (float)(Padding.Left + Padding.Right + SlotDesiredSize.X));
+                ChildHeightMax = FMath::Max(ChildHeightMax, (float)(Padding.Top + Padding.Bottom + SlotDesiredSize.Y));
             }
         }
         if (bWidthFitToChildren)
@@ -74,6 +75,7 @@ void UUIPanelLayout_Overlay::OnRebuildLayout()
         if (auto Slot = Cast<UUIPanelLayout_Overlay_Slot>(LayoutChild.LayoutInterface.Get()))
         {
             if (Slot->GetIgnoreLayout())continue;
+            const FVector2D SlotDesiredSize = Slot->ComputeDesiredSize(LayoutChild.ChildUIItem.Get());
             auto& Padding = Slot->GetPadding();
             auto UIItem = LayoutChild.ChildUIItem.Get();
             float ItemAreaWidth = RectSize.X - (Padding.Left + Padding.Right);
@@ -81,8 +83,8 @@ void UUIPanelLayout_Overlay::OnRebuildLayout()
 
             auto HAlign = Slot->GetHorizontalAlignment();
             auto VAlign = Slot->GetVerticalAlignment();
-            float ItemWidth = Slot->GetDesiredSize().X;
-            float ItemHeight = Slot->GetDesiredSize().Y;
+            float ItemWidth = SlotDesiredSize.X;
+            float ItemHeight = SlotDesiredSize.Y;
             auto ItemOffsetX = 0.0f;
             auto ItemOffsetY = 0.0f;
             if (ItemWidth < ItemAreaWidth)

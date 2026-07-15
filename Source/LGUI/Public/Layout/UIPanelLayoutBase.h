@@ -19,6 +19,8 @@ protected:
 	virtual void GetLayoutElement(UUIItem* InChild, UObject*& OutLayoutElement, bool& OutIgnoreLayout)const;
 	virtual void RebuildChildrenList()const override;
 	virtual void Awake() override;
+	/** Per-frame: re-measure AutoFromContent slots (content can change without a dimension event, e.g. text edits) and rebuild when a measurement changed. */
+	virtual void OnUpdateLayout_Implementation()override;
 
 	virtual void OnUIChildAcitveInHierarchy(UUIItem* InChild, bool InUIActive)override;
 	virtual void OnUIChildAttachmentChanged(UUIItem* InChild, bool attachOrDetach)override;
@@ -43,6 +45,19 @@ public:
 #endif
 };
 
+UENUM(BlueprintType)
+enum class EUIPanelLayoutSlotDesiredSizeMode : uint8
+{
+	/** Use the DesiredSize values entered on this slot. */
+	Manual,
+	/**
+	 * Measure the child's content on every layout rebuild, like UMG's desired size:
+	 * UIText = text real size, UISprite = sprite source size, UITexture = texture size.
+	 * Falls back to the manual values when the content is not measurable (e.g. a container).
+	 */
+	AutoFromContent,
+};
+
 UCLASS(BlueprintType, Blueprintable, Abstract, DefaultToInstanced)
 class LGUI_API UUIPanelLayoutSlotBase : public UObject
 {
@@ -52,8 +67,11 @@ protected:
 	void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent)override;
 	void PostEditUndo()override;
 #endif
-	/** The desired with and height that this layout element trying to fit. */
+	/** How the desired size is determined: entered manually, or measured from the child's content (UMG-style). */
 	UPROPERTY(EditAnywhere, Category = "Panel Layout Slot")
+		EUIPanelLayoutSlotDesiredSizeMode DesiredSizeMode = EUIPanelLayoutSlotDesiredSizeMode::Manual;
+	/** The desired with and height that this layout element trying to fit. */
+	UPROPERTY(EditAnywhere, Category = "Panel Layout Slot", meta = (EditCondition = "DesiredSizeMode == EUIPanelLayoutSlotDesiredSizeMode::Manual"))
 		FVector2D DesiredSize = FVector2D(100, 100);
 	/** Ignore parent layout. */
 	UPROPERTY(EditAnywhere, Category = "Panel Layout Slot")
@@ -62,11 +80,33 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Panel Layout Slot")
 		FVector2D GetDesiredSize()const { return DesiredSize; }
 	UFUNCTION(BlueprintCallable, Category = "Panel Layout Slot")
+		EUIPanelLayoutSlotDesiredSizeMode GetDesiredSizeMode()const { return DesiredSizeMode; }
+	/**
+	 * Desired size resolved per DesiredSizeMode: AutoFromContent measures InChild's content
+	 * (text / sprite / texture natural size) and falls back to the manual DesiredSize when
+	 * the content cannot be measured. This is what the panel layouts actually use.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Panel Layout Slot")
+		FVector2D ComputeDesiredSize(class UUIItem* InChild)const;
+	UFUNCTION(BlueprintCallable, Category = "Panel Layout Slot")
 		bool GetIgnoreLayout()const { return bIgnoreLayout; }
 	UFUNCTION(BlueprintCallable, Category = "Panel Layout Slot")
 		void SetIgnoreLayout(bool Value);
 	UFUNCTION(BlueprintCallable, Category = "Panel Layout Slot")
 		void SetDesiredSize(const FVector2D& Value);
+	UFUNCTION(BlueprintCallable, Category = "Panel Layout Slot")
+		void SetDesiredSizeMode(EUIPanelLayoutSlotDesiredSizeMode Value);
+
+	/** Change detection for the per-frame AutoFromContent re-measure; stores the value, returns whether it differs from the last call. */
+	bool UpdateMeasuredSizeCache(const FVector2D& InMeasured)
+	{
+		const bool bChanged = !LastMeasuredSize.IsSet() || !LastMeasuredSize.GetValue().Equals(InMeasured);
+		LastMeasuredSize = InMeasured;
+		return bChanged;
+	}
+private:
+	/** Last AutoFromContent measurement (transient; only for change detection). */
+	TOptional<FVector2D> LastMeasuredSize;
 };
 
 UCLASS(Abstract)

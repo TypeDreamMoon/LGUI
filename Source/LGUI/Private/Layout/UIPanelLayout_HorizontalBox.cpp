@@ -50,22 +50,23 @@ void UUIPanelLayout_HorizontalBox::OnRebuildLayout()
         if (auto Slot = Cast<UUIPanelLayout_HorizontalBox_Slot>(LayoutChild.LayoutInterface.Get()))
         {
             if (Slot->GetIgnoreLayout())continue;
+            const FVector2D SlotDesiredSize = Slot->ComputeDesiredSize(LayoutChild.ChildUIItem.Get());
             auto& Size = Slot->GetSizeRule();
             if (Size.SizeRule == ESlateSizeRule::Fill)
             {
                 TotalFillRatio += Size.Value;
-                TotalFillWidth += Slot->GetDesiredSize().X;
+                TotalFillWidth += SlotDesiredSize.X;
             }
             else
             {
-                TotalAutoWidth += Slot->GetDesiredSize().X;
+                TotalAutoWidth += SlotDesiredSize.X;
             }
             auto& Padding = Slot->GetPadding();
             TotalPaddingWidth += Padding.Left + Padding.Right;
 
             if (bHeightFitToChildren)
             {
-                auto HeightWithPadding = Padding.Top + Padding.Bottom + Slot->GetDesiredSize().Y;
+                auto HeightWithPadding = Padding.Top + Padding.Bottom + SlotDesiredSize.Y;
                 if (ChildHeightMin > HeightWithPadding)
                 {
                     ChildHeightMin = HeightWithPadding;
@@ -96,6 +97,7 @@ void UUIPanelLayout_HorizontalBox::OnRebuildLayout()
         if (auto Slot = Cast<UUIPanelLayout_HorizontalBox_Slot>(LayoutChild.LayoutInterface.Get()))
         {
             if (Slot->GetIgnoreLayout())continue;
+            const FVector2D SlotDesiredSize = Slot->ComputeDesiredSize(LayoutChild.ChildUIItem.Get());
             auto& Padding = Slot->GetPadding();
             auto UIItem = LayoutChild.ChildUIItem.Get();
             auto& Size = Slot->GetSizeRule();
@@ -107,12 +109,12 @@ void UUIPanelLayout_HorizontalBox::OnRebuildLayout()
             }
             else
             {
-                ItemAreaWidth = Slot->GetDesiredSize().X;
+                ItemAreaWidth = SlotDesiredSize.X;
             }
             auto HAlign = Slot->GetHorizontalAlignment();
             auto VAlign = Slot->GetVerticalAlignment();
-            float ItemWidth = Slot->GetDesiredSize().X;
-            float ItemHeight = Slot->GetDesiredSize().Y;
+            float ItemWidth = SlotDesiredSize.X;
+            float ItemHeight = SlotDesiredSize.Y;
             auto ItemOffsetX = 0.0f;
             auto ItemOffsetY = 0.0f;
             if (ItemWidth < ItemAreaWidth)
