@@ -74,6 +74,10 @@ private:
 	void LoadFavorites();
 	void SaveFavorites()const;
 
+	// hide-in-palette (stored on the prefab asset, ULGUIPrefab::bHideInPalette)
+	bool IsAssetHiddenInPalette(const FAssetData& InAssetData)const;
+	void ToggleItemHidden(FItemPtr InItem);
+
 	// asset registry change handlers (may fire off the game thread -- only set the dirty flag)
 	void OnAssetChanged(const FAssetData& InAssetData);
 	void OnAssetRenamed(const FAssetData& InAssetData, const FString& InOldObjectPath);
@@ -92,6 +96,8 @@ private:
 	FTextFilterExpressionEvaluator SearchFilter{ ETextFilterExpressionEvaluatorMode::BasicString };
 	/** Object paths of favorited prefab assets. */
 	TSet<FString> FavoritePaths;
+	/** When true, prefabs marked bHideInPalette are shown (greyed out) so they can be unhidden. */
+	bool bShowHiddenPrefabs = false;
 
 	std::atomic<bool> bPendingRebuild{ false };
 

@@ -302,8 +302,9 @@ void FLGUIPrefabEditor::RegisterTabSpawners(const TSharedRef<FTabManager>& InTab
 		.SetIcon(FSlateIcon(FAppStyle::GetAppStyleSetName(), "LevelEditor.Tabs.Outliner"));
 
 	InTabManager->RegisterTabSpawner(FLGUIPrefabEditorTabs::PrefabRawDataViewerID, FOnSpawnTab::CreateSP(this, &FLGUIPrefabEditor::SpawnTab_PrefabRawDataViewer))
-		.SetDisplayName(LOCTEXT("PrefabRawDataViewerTabLabel", "PrefabRawDataViewer"))
+		.SetDisplayName(LOCTEXT("PrefabRawDataViewerTabLabel", "Prefab Settings"))
 		.SetGroup(WorkspaceMenuCategoryRef)
+		.SetIcon(FSlateIcon(FAppStyle::GetAppStyleSetName(), "Icons.Settings"))
 		;
 
 	InTabManager->RegisterTabSpawner(FLGUIPrefabEditorTabs::PrefabPaletteID, FOnSpawnTab::CreateSP(this, &FLGUIPrefabEditor::SpawnTab_PrefabPalette))
@@ -380,7 +381,7 @@ void FLGUIPrefabEditor::InitPrefabEditor(const EToolkitMode::Type Mode, const TS
 	ExtendToolbar();
 
 	// Default layout
-	const TSharedRef<FTabManager::FLayout> StandaloneDefaultLayout = FTabManager::NewLayout("Standalone_LGUIPrefabEditor_Layout_v2")
+	const TSharedRef<FTabManager::FLayout> StandaloneDefaultLayout = FTabManager::NewLayout("Standalone_LGUIPrefabEditor_Layout_v3")
 		->AddArea
 		(
 			FTabManager::NewPrimaryArea()
@@ -409,6 +410,8 @@ void FLGUIPrefabEditor::InitPrefabEditor(const EToolkitMode::Type Mode, const TS
 					FTabManager::NewStack()
 					->SetSizeCoefficient(0.2f)
 					->AddTab(FLGUIPrefabEditorTabs::DetailsID, ETabState::OpenedTab)
+					->AddTab(FLGUIPrefabEditorTabs::PrefabRawDataViewerID, ETabState::OpenedTab)
+					->SetForegroundTab(FLGUIPrefabEditorTabs::DetailsID)
 				)
 			)
 		);
@@ -720,9 +723,10 @@ TSharedRef<SDockTab> FLGUIPrefabEditor::SpawnTab_Outliner(const FSpawnTabArgs& A
 
 TSharedRef<SDockTab> FLGUIPrefabEditor::SpawnTab_PrefabRawDataViewer(const FSpawnTabArgs& Args)
 {
-	// Spawn the tab
+	// Spawn the tab. This is the prefab asset's own details view -- LGUI's version of
+	// UMG's "Class Settings" (palette category, hide in palette, reference lists, raw data).
 	return SNew(SDockTab)
-		.Label(LOCTEXT("OverrideParameterTab_Title", "PrefabRawData"))
+		.Label(LOCTEXT("OverrideParameterTab_Title", "Prefab Settings"))
 		[
 			PrefabRawDataViewer.ToSharedRef()
 		];

@@ -17,6 +17,7 @@
 #include "ScopedTransaction.h"
 #include "Styling/AppStyle.h"
 #include "Widgets/Images/SImage.h"
+#include "Widgets/Input/SCheckBox.h"
 #include "Widgets/Input/SEditableTextBox.h"
 #include "Widgets/Input/SSearchBox.h"
 #include "Widgets/Layout/SBox.h"
@@ -51,9 +52,34 @@ void SLGUIPrefabPalette::Construct(const FArguments& InArgs, TSharedPtr<FLGUIPre
 		.AutoHeight()
 		.Padding(2, 2, 2, 4)
 		[
-			SNew(SSearchBox)
-			.HintText(LOCTEXT("SearchHint", "Search prefabs"))
-			.OnTextChanged(this, &SLGUIPrefabPalette::OnSearchTextChanged)
+			SNew(SHorizontalBox)
+			+ SHorizontalBox::Slot()
+			.FillWidth(1.0f)
+			[
+				SNew(SSearchBox)
+				.HintText(LOCTEXT("SearchHint", "Search prefabs"))
+				.OnTextChanged(this, &SLGUIPrefabPalette::OnSearchTextChanged)
+			]
+			+ SHorizontalBox::Slot()
+			.AutoWidth()
+			.Padding(4, 0, 0, 0)
+			.VAlign(VAlign_Center)
+			[
+				SNew(SCheckBox)
+				.Style(FAppStyle::Get(), "ToggleButtonCheckbox")
+				.ToolTipText(LOCTEXT("ShowHiddenTooltip", "Show prefabs marked \"Hide In Palette\" (greyed out) so they can be unhidden"))
+				.IsChecked_Lambda([this]() { return bShowHiddenPrefabs ? ECheckBoxState::Checked : ECheckBoxState::Unchecked; })
+				.OnCheckStateChanged_Lambda([this](ECheckBoxState NewState)
+					{
+						bShowHiddenPrefabs = (NewState == ECheckBoxState::Checked);
+						RequestRebuild();
+					})
+				[
+					SNew(SImage)
+					.Image(FAppStyle::Get().GetBrush("Icons.Visibility"))
+					.DesiredSizeOverride(FVector2D(16, 16))
+				]
+			]
 		]
 		+ SVerticalBox::Slot()
 		.FillHeight(1.0f)
@@ -142,6 +168,11 @@ void SLGUIPrefabPalette::RebuildList()
 	{
 		// the prefab being edited can never be its own child -- hide it
 		if (EditingPrefabPath.IsValid() && AssetData.ToSoftObjectPath() == EditingPrefabPath)
+		{
+			continue;
+		}
+		// respect the asset's "hide in palette" flag unless the show-hidden filter is on
+		if (!bShowHiddenPrefabs && IsAssetHiddenInPalette(AssetData))
 		{
 			continue;
 		}
@@ -270,6 +301,13 @@ TSharedRef<ITableRow> SLGUIPrefabPalette::OnGenerateRow(FItemPtr InItem, const T
 			[
 				SNew(STextBlock)
 				.Text(FText::FromName(InItem->Asset.AssetName))
+				// hidden prefabs (visible via the show-hidden filter) render greyed out
+				.ColorAndOpacity_Lambda([this, WeakItem = TWeakPtr<FLGUIPrefabPaletteItem>(InItem)]()
+					{
+						auto Pinned = WeakItem.Pin();
+						return (Pinned.IsValid() && IsAssetHiddenInPalette(Pinned->Asset))
+							? FSlateColor::UseSubduedForeground() : FSlateColor::UseForeground();
+					})
 			]
 			+ SHorizontalBox::Slot()
 			.AutoWidth()
@@ -348,6 +386,13 @@ TSharedPtr<SWidget> SLGUIPrefabPalette::OnContextMenuOpening()
 			FSlateIcon(FAppStyle::GetAppStyleSetName(), "SystemWideCommands.FindInContentBrowser"),
 			FUIAction(FExecuteAction::CreateSP(this, &SLGUIPrefabPalette::BrowseToAsset, Item)));
 
+		const bool bIsHidden = IsAssetHiddenInPalette(Item->Asset);
+		MenuBuilder.AddMenuEntry(
+			bIsHidden ? LOCTEXT("ShowInPalette", "Show in Palette") : LOCTEXT("HideInPalette", "Hide in Palette"),
+			LOCTEXT("ToggleHiddenTooltip", "Stored on the prefab asset (bHideInPalette). Hidden prefabs can be shown again via the palette's show-hidden filter or the Prefab Settings tab."),
+			FSlateIcon(FAppStyle::GetAppStyleSetName(), "Icons.Visibility"),
+			FUIAction(FExecuteAction::CreateSP(this, &SLGUIPrefabPalette::ToggleItemHidden, Item)));
+
 		MenuBuilder.AddSubMenu(
 			LOCTEXT("SetCategory", "Set Category"),
 			LOCTEXT("SetCategoryTooltip", "Set this prefab's palette category (stored on the prefab asset)"),
@@ -412,6 +457,37 @@ void SLGUIPrefabPalette::OnNewCategoryTextCommitted(const FText& InText, ETextCo
 	{
 		FSlateApplication::Get().DismissAllMenus();
 		SetItemCategory(InItem, InText.ToString().TrimStartAndEnd());
+	}
+}
+
+bool SLGUIPrefabPalette::IsAssetHiddenInPalette(const FAssetData& InAssetData)const
+{
+	// loaded assets may have an unsaved edit -- prefer the live property
+	if (InAssetData.IsAssetLoaded())
+	{
+		if (auto Prefab = Cast<ULGUIPrefab>(InAssetData.GetAsset()))
+		{
+#if WITH_EDITORONLY_DATA
+			return Prefab->bHideInPalette;
+#endif
+		}
+	}
+	return InAssetData.GetTagValueRef<FString>(TEXT("bHideInPalette")) == TEXT("True");
+}
+
+void SLGUIPrefabPalette::ToggleItemHidden(FItemPtr InItem)
+{
+	if (!InItem.IsValid() || InItem->IsCategory())return;
+	// explicit user action -- loading the single asset is acceptable here
+	if (auto Prefab = Cast<ULGUIPrefab>(InItem->Asset.GetAsset()))
+	{
+#if WITH_EDITORONLY_DATA
+		FScopedTransaction Transaction(LOCTEXT("ToggleHideInPaletteTransaction", "Toggle Prefab Hide In Palette"));
+		Prefab->Modify();
+		Prefab->bHideInPalette = !Prefab->bHideInPalette;
+		Prefab->MarkPackageDirty();
+#endif
+		RequestRebuild();
 	}
 }
 

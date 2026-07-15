@@ -206,6 +206,9 @@ public:
 	 */
 	UPROPERTY(EditAnywhere, AssetRegistrySearchable, Category = "LGUI")
 		FString PaletteCategory;
+	/** Hide this prefab from the Prefab Palette (it can still be used normally). Toggle the palette's "show hidden" filter to see and unhide it. */
+	UPROPERTY(EditAnywhere, AssetRegistrySearchable, Category = "LGUI")
+		bool bHideInPalette = false;
 #endif
 	/** Prefab system's version when creating this prefab */
 	UPROPERTY()
