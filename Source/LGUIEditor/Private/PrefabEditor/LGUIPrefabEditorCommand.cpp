@@ -9,6 +9,7 @@ void FLGUIPrefabEditorCommand::RegisterCommands()
 	UI_COMMAND(Apply, "Apply", "Apply changes to prefab.", EUserInterfaceActionType::Button, FInputChord());
 	UI_COMMAND(RawDataViewer, "Prefab Settings", "Edit this prefab asset's own properties (palette category, hide in palette, references, raw data). Like UMG's Class Settings.", EUserInterfaceActionType::Button, FInputChord());
 	UI_COMMAND(OpenPrefabHelperObject, "PrefabHelperObject", "Open PrefabHelperObject details panel of this prefab.", EUserInterfaceActionType::Button, FInputChord());
+	UI_COMMAND(OpenBehaviourBlueprint, "Behaviour", "Open this prefab's companion behaviour blueprint (the logic host attached to the prefab root), creating BP_<PrefabName> next to the prefab if there is none yet. Like double-clicking a UMG Widget Blueprint's Graph.", EUserInterfaceActionType::Button, FInputChord());
 	UI_COMMAND(CopyActor, "Copy Actors", "Copy selected actors with hierarchy", EUserInterfaceActionType::Button, FInputChord(EKeys::C, EModifierKey::Shift | EModifierKey::Alt));
 	UI_COMMAND(PasteActor, "Paste Actors", "Paste actors with hierarchy", EUserInterfaceActionType::Button, FInputChord(EKeys::V, EModifierKey::Shift | EModifierKey::Alt));
 	UI_COMMAND(CutActor, "Cut Actors", "Cut actors with hierarchy", EUserInterfaceActionType::Button, FInputChord(EKeys::X, EModifierKey::Shift | EModifierKey::Alt));

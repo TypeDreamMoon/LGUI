@@ -21,6 +21,9 @@
 #include "ActorBrowsingMode.h"
 #include "DragAndDrop/AssetDragDropOp.h"
 #include "SLGUIPrefabPalette.h"//FLGUIElementTemplateDragDropOp
+#include "Core/ActorComponent/UIItem.h"
+#include "Core/LGUILifeCycleBehaviour.h"
+#include "Styling/SlateIconFinder.h"
 #include "LGUIPrefabEditorCommand.h"
 #include "Framework/Commands/GenericCommands.h"
 #include "Framework/MultiBox/MultiBoxBuilder.h"
@@ -187,6 +190,53 @@ public:
 									})));
 						}
 					}));
+		}
+		MenuBuilder.EndSection();
+		MenuBuilder.BeginSection("LGUIPrefabOutlinerBehaviour", LOCTEXT("OutlinerBehaviourSection", "Behaviour"));
+		{
+			// UMG "Is Variable" counterpart: bind the selected element (actor or one of its
+			// components) to a member variable on the prefab's companion behaviour blueprint
+			AActor* SelectedActor = PrefabEditor->GetCurrentSelectedActor();
+			if (SelectedActor != nullptr
+				&& !FLGUIPrefabEditor::ActorIsRootAgent(SelectedActor)
+				&& SelectedActor != PrefabEditor->GetPrefabManagerObject()->LoadedRootActor)
+			{
+				MenuBuilder.AddSubMenu(
+					LOCTEXT("PromoteSubMenu", "Promote to Behaviour Variable"),
+					LOCTEXT("PromoteSubMenuTooltip", "Add a variable to this prefab's behaviour blueprint (created on demand) and bind it to the selected element. The reference is saved with the prefab, so no runtime lookup is needed."),
+					FNewMenuDelegate::CreateLambda([WeakEditor = PrefabEditorPtr, WeakActor = TWeakObjectPtr<AActor>(SelectedActor)](FMenuBuilder& SubMenu)
+						{
+							auto AddTargetEntry = [&SubMenu, WeakEditor](UObject* Target, const FText& Label)
+								{
+									SubMenu.AddMenuEntry(
+										Label,
+										FText::FromString(Target->GetClass()->GetPathName()),
+										FSlateIconFinder::FindIconForClass(Target->GetClass()),
+										FUIAction(FExecuteAction::CreateLambda([WeakEditor, WeakTarget = TWeakObjectPtr<UObject>(Target)]()
+											{
+												auto Editor = WeakEditor.Pin();
+												if (Editor.IsValid() && WeakTarget.IsValid())
+												{
+													Editor->PromoteToBehaviourVariable(WeakTarget.Get());
+												}
+											})));
+								};
+							AActor* Actor = WeakActor.Get();
+							if (Actor == nullptr)return;
+							// the components carry the useful APIs (SetText/OnClick/...), the actor
+							// itself is the fallback for hierarchy-level operations
+							for (UActorComponent* Comp : Actor->GetComponents())
+							{
+								if (Comp == nullptr)continue;
+								if (!Comp->IsA<UUIItem>() && !Comp->IsA<ULGUILifeCycleBehaviour>())continue;
+								AddTargetEntry(Comp, FText::Format(LOCTEXT("PromoteAsComponent", "As {0} ({1})")
+									, Comp->GetClass()->GetDisplayNameText(), FText::FromString(Comp->GetName())));
+							}
+							SubMenu.AddSeparator();
+							AddTargetEntry(Actor, FText::Format(LOCTEXT("PromoteAsActor", "As Actor ({0})")
+								, Actor->GetClass()->GetDisplayNameText()));
+						}));
+			}
 		}
 		MenuBuilder.EndSection();
 		MenuBuilder.BeginSection("LGUIPrefabOutlinerAlign", LOCTEXT("OutlinerAlignSection", "Align"));
