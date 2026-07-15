@@ -664,6 +664,7 @@ void FLGUIPrefabEditor::OnApply()
 		PrefabBeingEdited->PrefabDataForPrefabEditor.ViewLocation = ViewTransform.GetLocation();
 		PrefabBeingEdited->PrefabDataForPrefabEditor.ViewRotation = ViewTransform.GetRotation();
 		PrefabBeingEdited->PrefabDataForPrefabEditor.ViewOrbitLocation = ViewTransform.GetLookAt();
+		PrefabBeingEdited->PrefabDataForPrefabEditor.ViewportType = (uint8)ViewportPtr->GetViewportClient()->GetViewportType();
 		if (auto RootAgentActor = GetPreviewScene().GetRootAgentActor())
 		{
 			if (!ULGUIPrefabManagerObject::OnPrefabEditor_SavePrefab.ExecuteIfBound(RootAgentActor, PrefabBeingEdited))

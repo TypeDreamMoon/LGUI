@@ -37,6 +37,10 @@ public:
 	virtual FReply OnDrop(const FGeometry& MyGeometry, const FDragDropEvent& DragDropEvent) override;
 	// End of SWidget interface
 
+	/** Toggle between the 2D canvas view (LVT_OrthoYZ, facing the UI) and the perspective view. Persisted per prefab. */
+	void ToggleViewportType2D3D();
+	bool IsViewport2D() const;
+
 private:
 	// Pointer back to owning sprite editor instance (the keeper of state)
 	TWeakPtr<FLGUIPrefabEditor> PrefabEditorPtr;

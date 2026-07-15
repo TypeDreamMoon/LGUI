@@ -18,6 +18,7 @@ public:
 
 	// SCommonEditorViewportToolbarBase interface
 	virtual TSharedRef<SWidget> GenerateShowMenu() const override;
+	virtual void ExtendLeftAlignedToolbarSlots(TSharedPtr<SHorizontalBox> MainBoxPtr, TSharedPtr<SViewportToolBar> ParentToolBarPtr) const override;
 	// End of SCommonEditorViewportToolbarBase
 
 };
