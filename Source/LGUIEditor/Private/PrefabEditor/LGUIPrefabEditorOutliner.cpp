@@ -20,6 +20,9 @@
 #include "PrefabSystem/LGUIPrefabHelperObject.h"
 #include "ActorBrowsingMode.h"
 #include "DragAndDrop/AssetDragDropOp.h"
+#include "LGUIPrefabEditorCommand.h"
+#include "Framework/MultiBox/MultiBoxBuilder.h"
+#include "Editor.h"
 
 #define LOCTEXT_NAMESPACE "LGUIPrefabEditorOutliner"
 
@@ -102,6 +105,54 @@ public:
 			return;
 		}
 		FActorBrowsingMode::OnDrop(DropTarget, Payload, ValidationInfo);
+	}
+
+	virtual TSharedPtr<SWidget> CreateContextMenu() override
+	{
+		auto PrefabEditor = PrefabEditorPtr.Pin();
+		if (!PrefabEditor.IsValid())
+		{
+			return FActorBrowsingMode::CreateContextMenu();
+		}
+		if (GEditor->GetSelectedActorCount() == 0)
+		{
+			return nullptr;
+		}
+
+		// build from the prefab editor's toolkit command list, so entries show their key bindings
+		// and share CanExecute/Execute with the viewport shortcuts
+		const FLGUIPrefabEditorCommand& Commands = FLGUIPrefabEditorCommand::Get();
+		FMenuBuilder MenuBuilder(true, PrefabEditor->GetToolkitCommands());
+		MenuBuilder.BeginSection("LGUIPrefabOutlinerEdit", LOCTEXT("OutlinerEditSection", "Edit"));
+		{
+			MenuBuilder.AddMenuEntry(Commands.CutActor);
+			MenuBuilder.AddMenuEntry(Commands.CopyActor);
+			MenuBuilder.AddMenuEntry(Commands.PasteActor);
+			MenuBuilder.AddMenuEntry(Commands.DuplicateActor);
+		}
+		MenuBuilder.EndSection();
+		MenuBuilder.BeginSection("LGUIPrefabOutlinerDelete", LOCTEXT("OutlinerDeleteSection", "Delete"));
+		{
+			MenuBuilder.AddMenuEntry(Commands.DestroyActor);
+			MenuBuilder.AddMenuEntry(Commands.DestroyActorKeepChildren);
+		}
+		MenuBuilder.EndSection();
+		return MenuBuilder.MakeWidget();
+	}
+
+	virtual FReply OnKeyDown(const FKeyEvent& InKeyEvent) override
+	{
+		// Shift+Delete = delete keeping children. Must be intercepted BEFORE the base class:
+		// FActorBrowsingMode treats any Delete press (regardless of modifiers) as plain delete.
+		if (InKeyEvent.GetKey() == EKeys::Delete && InKeyEvent.IsShiftDown())
+		{
+			if (auto PrefabEditor = PrefabEditorPtr.Pin())
+			{
+				PrefabEditor->DeleteSelectedActors_KeepChildren();
+				return FReply::Handled();
+			}
+		}
+		return FActorBrowsingMode::OnKeyDown(InKeyEvent);
 	}
 
 private:

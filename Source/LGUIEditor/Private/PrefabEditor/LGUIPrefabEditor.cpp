@@ -457,7 +457,7 @@ void FLGUIPrefabEditor::GetInitialViewLocationAndRotation(FVector& OutLocation, 
 	}
 }
 
-void FLGUIPrefabEditor::DeleteActors(const TArray<TWeakObjectPtr<AActor>>& InSelectedActorArray)
+void FLGUIPrefabEditor::DeleteActors(const TArray<TWeakObjectPtr<AActor>>& InSelectedActorArray, bool bKeepChildren)
 {
 	for (auto Item : InSelectedActorArray)
 	{
@@ -489,7 +489,63 @@ void FLGUIPrefabEditor::DeleteActors(const TArray<TWeakObjectPtr<AActor>>& InSel
 			SelectedActorArray.Add(Item.Get());
 		}
 	}
-	LGUIEditorTools::DeleteActors_Impl(SelectedActorArray);
+
+	if (bKeepChildren)
+	{
+		// reparent surviving children to the deleted actor's parent before destroying, so they
+		// stay in the hierarchy (same transaction as the delete below via nested transactions)
+		GEditor->BeginTransaction(LOCTEXT("DeleteActorsKeepChildren_Transaction", "LGUI Delete Actors (Keep Children)"));
+		for (auto& ActorToDelete : SelectedActorArray)
+		{
+			// a sub prefab root always takes its whole prefab along -- its children are prefab
+			// members and must not be pulled out of the prefab
+			if (PrefabHelperObject->SubPrefabMap.Contains(ActorToDelete))
+			{
+				continue;
+			}
+			AActor* NewParent = ActorToDelete->GetAttachParentActor();
+			if (NewParent == nullptr)
+			{
+				continue;
+			}
+			TArray<AActor*> ChildActors;
+			ActorToDelete->GetAttachedActors(ChildActors);
+			for (auto& Child : ChildActors)
+			{
+				if (SelectedActorArray.Contains(Child))continue;//also being deleted
+				if (auto ChildRoot = Child->GetRootComponent())
+				{
+					Child->Modify();
+					ChildRoot->AttachToComponent(NewParent->GetRootComponent(), FAttachmentTransformRules::KeepWorldTransform);
+				}
+			}
+		}
+		LGUIEditorTools::DeleteActors_Impl(SelectedActorArray);
+		GEditor->EndTransaction();
+	}
+	else
+	{
+		LGUIEditorTools::DeleteActors_Impl(SelectedActorArray);
+	}
+}
+
+void FLGUIPrefabEditor::DeleteSelectedActors_KeepChildren()
+{
+	TArray<TWeakObjectPtr<AActor>> SelectedActors;
+	for (FSelectionIterator It(GEditor->GetSelectedActorIterator()); It; ++It)
+	{
+		if (AActor* Actor = Cast<AActor>(*It))
+		{
+			if (Actor->GetWorld() == this->GetWorld())
+			{
+				SelectedActors.Add(Actor);
+			}
+		}
+	}
+	if (SelectedActors.Num() > 0)
+	{
+		DeleteActors(SelectedActors, true);
+	}
 }
 
 void FLGUIPrefabEditor::ApplyPrefab()
@@ -653,6 +709,13 @@ void FLGUIPrefabEditor::BindCommands()
 	ToolkitCommands->MapAction(
 		PrefabEditorCommands.DestroyActor,
 		FExecuteAction::CreateStatic(&LGUIEditorTools::DeleteSelectedActors_Impl),
+		FCanExecuteAction::CreateStatic(&LGUIEditorTools::CanDeleteActor),
+		FGetActionCheckState(),
+		FIsActionButtonVisible::CreateStatic(&LGUIEditorTools::CanDeleteActor)
+	);
+	ToolkitCommands->MapAction(
+		PrefabEditorCommands.DestroyActorKeepChildren,
+		FExecuteAction::CreateSP(this, &FLGUIPrefabEditor::DeleteSelectedActors_KeepChildren),
 		FCanExecuteAction::CreateStatic(&LGUIEditorTools::CanDeleteActor),
 		FGetActionCheckState(),
 		FIsActionButtonVisible::CreateStatic(&LGUIEditorTools::CanDeleteActor)

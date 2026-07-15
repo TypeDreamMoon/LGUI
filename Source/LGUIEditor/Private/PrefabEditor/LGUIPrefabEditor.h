@@ -73,7 +73,15 @@ public:
 	ULGUIPrefab* GetPrefabBeingEdited()const { return PrefabBeingEdited; }
 	AActor* GetCurrentSelectedActor()const { return CurrentSelectedActor.Get(); }
 
-	void DeleteActors(const TArray<TWeakObjectPtr<AActor>>& InSelectedActorArray);
+	/**
+	 * Delete actors (with validation: root, root agent and sub-prefab members are refused).
+	 * @param bKeepChildren  When true, direct child actors that are not themselves being deleted
+	 *                       are reparented to the deleted actor's parent instead of being destroyed.
+	 *                       (Sub prefab roots always take their whole prefab with them.)
+	 */
+	void DeleteActors(const TArray<TWeakObjectPtr<AActor>>& InSelectedActorArray, bool bKeepChildren = false);
+	/** Delete the currently selected actors, reparenting their children (Shift+Delete). */
+	void DeleteSelectedActors_KeepChildren();
 
 	static FLGUIPrefabEditor* GetEditorForPrefabIfValid(ULGUIPrefab* InPrefab);
 	static ULGUIPrefabHelperObject* GetEditorPrefabHelperObjectForActor(AActor* InActor);

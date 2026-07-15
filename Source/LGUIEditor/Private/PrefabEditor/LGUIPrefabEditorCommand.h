@@ -33,4 +33,5 @@ public:
 	TSharedPtr<FUICommandInfo> CutActor;
 	TSharedPtr<FUICommandInfo> DuplicateActor;
 	TSharedPtr<FUICommandInfo> DestroyActor;
+	TSharedPtr<FUICommandInfo> DestroyActorKeepChildren;
 };

@@ -14,6 +14,7 @@ void FLGUIPrefabEditorCommand::RegisterCommands()
 	UI_COMMAND(CutActor, "Cut Actors", "Cut actors with hierarchy", EUserInterfaceActionType::Button, FInputChord(EKeys::X, EModifierKey::Shift | EModifierKey::Alt));
 	UI_COMMAND(DuplicateActor, "Duplicate Actors", "Duplicate selected actors with hierarchy", EUserInterfaceActionType::Button, FInputChord(EKeys::D, EModifierKey::Shift | EModifierKey::Alt));
 	UI_COMMAND(DestroyActor, "Destroy Actors", "Destroy selected actors with hierarchy", EUserInterfaceActionType::Button, FInputChord(EKeys::Delete));
+	UI_COMMAND(DestroyActorKeepChildren, "Destroy Actors (Keep Children)", "Destroy selected actors; their children are reparented to the destroyed actor's parent", EUserInterfaceActionType::Button, FInputChord(EKeys::Delete, EModifierKey::Shift));
 }
 
 #undef LOCTEXT_NAMESPACE
