@@ -24,7 +24,7 @@ private:
  * CAUTION!!! This layout could result in loop size reference! Use it carefully!
  * Use other UI element to control the size of this one.
  */
-UCLASS( ClassGroup=(LGUI), meta=(BlueprintSpawnableComponent) )
+UCLASS( ClassGroup=(LGUI), meta=(BlueprintSpawnableComponent, DisplayName = "Size Control by Other") )
 class LGUI_API UUISizeControlByOther : public UUILayoutWithAnimation
 {
 	GENERATED_BODY()

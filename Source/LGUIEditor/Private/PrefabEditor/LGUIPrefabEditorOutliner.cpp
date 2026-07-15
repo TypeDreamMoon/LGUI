@@ -20,6 +20,7 @@
 #include "PrefabSystem/LGUIPrefabHelperObject.h"
 #include "ActorBrowsingMode.h"
 #include "DragAndDrop/AssetDragDropOp.h"
+#include "SLGUIPrefabPalette.h"//FLGUIElementTemplateDragDropOp
 #include "LGUIPrefabEditorCommand.h"
 #include "Framework/Commands/GenericCommands.h"
 #include "Framework/MultiBox/MultiBoxBuilder.h"
@@ -70,6 +71,14 @@ public:
 				AActor* TargetActor = ActorItem->Actor.Get();
 				if (TargetActor != nullptr && !FLGUIPrefabEditor::ActorIsRootAgent(TargetActor))
 				{
+					// element templates (palette Panels/Layouts rows) show their display name
+					if (Payload.SourceOperation.IsOfType<FLGUIElementTemplateDragDropOp>())
+					{
+						auto& TemplateOp = static_cast<const FLGUIElementTemplateDragDropOp&>(Payload.SourceOperation);
+						return FSceneOutlinerDragValidationInfo(ESceneOutlinerDropCompatibility::CompatibleAttach
+							, FText::Format(LOCTEXT("DropTemplateOnActor", "Add {0} under {1}")
+								, TemplateOp.TemplateDisplayName, FText::FromString(TargetActor->GetActorLabel())));
+					}
 					// distinguish "add component to X" from "add child under X" in the hover hint
 					auto& AssetOp = static_cast<const FAssetDragDropOp&>(Payload.SourceOperation);
 					bool bAllComponentClasses = AssetOp.GetAssets().Num() > 0;
@@ -106,7 +115,13 @@ public:
 					if (auto PrefabEditor = PrefabEditorPtr.Pin())
 					{
 						auto& AssetOp = static_cast<const FAssetDragDropOp&>(Payload.SourceOperation);
-						PrefabEditor->HandleAssetsDropOnParentActor(AssetOp.GetAssets(), TargetActor);
+						// element templates label the created actor with their display name
+						FText CreatedActorLabel;
+						if (Payload.SourceOperation.IsOfType<FLGUIElementTemplateDragDropOp>())
+						{
+							CreatedActorLabel = static_cast<const FLGUIElementTemplateDragDropOp&>(Payload.SourceOperation).TemplateDisplayName;
+						}
+						PrefabEditor->HandleAssetsDropOnParentActor(AssetOp.GetAssets(), TargetActor, CreatedActorLabel);
 					}
 				}
 			}

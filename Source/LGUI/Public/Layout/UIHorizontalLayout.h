@@ -10,7 +10,7 @@
 /**
  * Layout child elements side by side horizontally
  */
-UCLASS( ClassGroup=(LGUI), meta=(BlueprintSpawnableComponent) )
+UCLASS( ClassGroup=(LGUI), meta=(BlueprintSpawnableComponent, DisplayName = "Horizontal Layout") )
 class LGUI_API UUIHorizontalLayout : public UUILayoutWithChildren
 {
 	GENERATED_BODY()

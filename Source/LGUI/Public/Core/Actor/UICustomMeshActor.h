@@ -9,7 +9,7 @@
 /**
  * Render UI element with LGUICustomMesh.
  */
-UCLASS(ClassGroup = LGUI)
+UCLASS(ClassGroup = LGUI, meta = (DisplayName = "UI Custom Mesh"))
 class LGUI_API AUICustomMeshActor : public AUIBaseRenderableActor
 {
 	GENERATED_BODY()

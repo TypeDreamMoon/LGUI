@@ -60,7 +60,7 @@ private:
 /**
  * LGUI Render Target provide a solution to display a LGUICanvas with RenderMode of RenderTarget, just like "Retainer Box", and interact it with UIRenderTargetInteraction component.
  */
-UCLASS(ClassGroup = LGUI)
+UCLASS(ClassGroup = LGUI, meta = (DisplayName = "UI Render Target"))
 class LGUI_API AUIRenderTargetActor : public AUIBaseRenderableActor
 {
 	GENERATED_BODY()

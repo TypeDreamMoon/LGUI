@@ -75,8 +75,12 @@ public:
 	/**
 	 * Create actors / sub prefabs from dropped assets, attached under the given parent actor.
 	 * Shared by the viewport drop (parent = selected actor) and the outliner row drop (parent = drop target row).
+	 * When the drop mixes an actor class with component classes (palette element templates,
+	 * e.g. "Horizontal Box" = container + layout component), the components are added to the
+	 * newly created actor instead of the parent.
+	 * @param InCreatedActorLabel  Optional label for actors spawned from classes (template display name).
 	 */
-	FReply HandleAssetsDropOnParentActor(const TArray<struct FAssetData>& DroppedAssetData, AActor* InParentActor);
+	FReply HandleAssetsDropOnParentActor(const TArray<struct FAssetData>& DroppedAssetData, AActor* InParentActor, const FText& InCreatedActorLabel = FText());
 
 	FLGUIPrefabEditorScene& GetPreviewScene();
 	UWorld* GetWorld();

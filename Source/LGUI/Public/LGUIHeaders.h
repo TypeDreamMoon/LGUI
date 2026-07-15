@@ -124,6 +124,7 @@
 #include "Layout/UIPanelLayout_VerticalBox.h"
 #include "Layout/UIPanelLayout_UniformGrid.h"
 #include "Layout/UIPanelLayout_FlexibleGrid.h"
+#include "Layout/UIPanelLayout_Overlay.h"
 
 #include "PrefabSystem/LGUIPrefab.h"
 #include "PrefabSystem/LGUIPrefabLevelManagerActor.h"

@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "AssetRegistry/AssetData.h"
+#include "DragAndDrop/AssetDragDropOp.h"
 #include "Misc/TextFilterExpressionEvaluator.h"
 #include "Widgets/SCompoundWidget.h"
 #include "Widgets/Views/STreeView.h"
@@ -22,15 +23,68 @@ enum class ELGUIPaletteTab : uint8
 };
 
 /**
+ * A composed element, UMG-Palette-style: an actor class plus the components that make it
+ * that element (e.g. "Horizontal Box" = UIContainerActor + UIPanelLayout_HorizontalBox).
+ * Saves the two-step "drag container, then drag layout component" dance.
+ */
+struct FLGUIPaletteElementTemplate
+{
+	FText DisplayName;
+	FText Tooltip;
+	TSubclassOf<AActor> ActorClass;
+	TArray<TSubclassOf<UActorComponent>> ComponentClasses;
+
+	/** The actor class + component classes as one asset-data list, the drag/drop payload format. */
+	TArray<FAssetData> BuildAssetList()const
+	{
+		TArray<FAssetData> Assets;
+		Assets.Add(FAssetData(ActorClass.Get()));
+		for (auto& ComponentClass : ComponentClasses)
+		{
+			Assets.Add(FAssetData(ComponentClass.Get()));
+		}
+		return Assets;
+	}
+};
+
+/**
+ * Drag payload for element templates. Subclasses FAssetDragDropOp so the whole existing
+ * asset drop pipeline (viewport drop, outliner ParseDragDrop/ValidateDrop/OnDrop) accepts
+ * it unchanged via IsOfType<FAssetDragDropOp>(); drop sites that additionally check for
+ * THIS type can read the template name to label the created actor.
+ */
+class FLGUIElementTemplateDragDropOp : public FAssetDragDropOp
+{
+public:
+	DRAG_DROP_OPERATOR_TYPE(FLGUIElementTemplateDragDropOp, FAssetDragDropOp)
+
+	FText TemplateDisplayName;
+
+	static TSharedRef<FLGUIElementTemplateDragDropOp> New(const FLGUIPaletteElementTemplate& InTemplate)
+	{
+		TSharedRef<FLGUIElementTemplateDragDropOp> Operation = MakeShared<FLGUIElementTemplateDragDropOp>();
+		Operation->TemplateDisplayName = InTemplate.DisplayName;
+		Operation->Init(InTemplate.BuildAssetList(), TArray<FString>(), nullptr);
+		// show the template name while dragging, not the raw class list
+		Operation->CurrentHoverText = Operation->DefaultHoverText = InTemplate.DisplayName;
+		Operation->Construct();
+		return Operation;
+	}
+};
+
+/**
  * One node of the palette tree: a category header (CategoryName set), a prefab asset row
- * (Asset valid), or a class row (ComponentClass valid -- either a behaviour/effect component
- * class to add to an actor, or a UI element ACTOR class to spawn under it).
+ * (Asset valid), a class row (ComponentClass valid -- either a behaviour/effect component
+ * class to add to an actor, or a UI element ACTOR class to spawn under it), or an element
+ * template row (Template valid).
  */
 struct FLGUIPrefabPaletteItem
 {
 	FAssetData Asset;
 	/** Component class (added to the target actor) OR UI element actor class (spawned under it). */
 	TWeakObjectPtr<UClass> ComponentClass;
+	/** Composed element: actor class + components, spawned as one unit. */
+	TSharedPtr<FLGUIPaletteElementTemplate> Template;
 	FString CategoryName;
 	/** True on the pinned "Favorites" header (distinguishes it from a user category literally named "Favorites"). */
 	bool bIsFavoritesGroup = false;
@@ -39,7 +93,8 @@ struct FLGUIPrefabPaletteItem
 	TArray<TSharedPtr<FLGUIPrefabPaletteItem>> Children;
 
 	bool IsComponentClass()const { return ComponentClass.IsValid(); }
-	bool IsCategory()const { return !Asset.IsValid() && !ComponentClass.IsValid(); }
+	bool IsElementTemplate()const { return Template.IsValid(); }
+	bool IsCategory()const { return !Asset.IsValid() && !ComponentClass.IsValid() && !Template.IsValid(); }
 };
 
 /**
@@ -95,7 +150,9 @@ private:
 	// component class rows
 	void CollectComponentClassGroups(TArray<FItemPtr>& OutGroupHeaders, FItemPtr& InOutFavoritesHeader);
 	void AddComponentToSelectedActor(FItemPtr InItem);
-	/** Favorites key: object path for assets, class path for component classes. */
+	/** Spawn an element template (actor + components) under the actor selected in the outliner. */
+	void AddTemplateUnderSelectedActor(FItemPtr InItem);
+	/** Favorites key: object path for assets, class path for component classes, name for templates. */
 	FString GetItemFavoriteKey(FItemPtr InItem)const;
 
 	// tab groups

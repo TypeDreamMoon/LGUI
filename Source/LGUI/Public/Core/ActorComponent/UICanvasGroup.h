@@ -11,7 +11,7 @@
  * The UICanvasGroup can be used to control certain aspects of a whole group of UI elements from one place without needing to handle them each individually.
  * The properties of the UICanvasGroup affect the UI element it is on as well as all children.
  */
-UCLASS(ClassGroup = (LGUI), Blueprintable, meta = (BlueprintSpawnableComponent))
+UCLASS(ClassGroup = (LGUI), Blueprintable, meta = (BlueprintSpawnableComponent, DisplayName = "Canvas Group"))
 class LGUI_API UUICanvasGroup : public UActorComponent
 {
 	GENERATED_BODY()

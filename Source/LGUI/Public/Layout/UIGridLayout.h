@@ -19,7 +19,7 @@
 /**
  * Layout child elements in grid
  */
-UCLASS( ClassGroup=(LGUI), meta=(BlueprintSpawnableComponent) )
+UCLASS( ClassGroup=(LGUI), meta=(BlueprintSpawnableComponent, DisplayName = "Grid Layout") )
 class LGUI_API UUIGridLayout : public UUILayoutWithChildren
 {
 	GENERATED_BODY()

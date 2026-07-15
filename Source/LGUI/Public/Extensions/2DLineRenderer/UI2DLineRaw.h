@@ -35,7 +35,7 @@ public:
 };
 
 
-UCLASS(ClassGroup = LGUI)
+UCLASS(ClassGroup = LGUI, meta = (DisplayName = "UI 2D Line"))
 class LGUI_API AUI2DLineActor : public AUIBaseRenderableActor
 {
 	GENERATED_BODY()

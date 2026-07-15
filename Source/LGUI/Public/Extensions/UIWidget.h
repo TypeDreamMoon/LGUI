@@ -312,7 +312,7 @@ private:
 /**
  * LGUI Widget can render a UMG widget as LGUI's element, and interact with it by UIWidgetInteraction component.
  */
-UCLASS(ClassGroup = LGUI)
+UCLASS(ClassGroup = LGUI, meta = (DisplayName = "UI Widget (UMG)"))
 class LGUI_API AUIWidgetActor : public AUIBaseRenderableActor
 {
 	GENERATED_BODY()

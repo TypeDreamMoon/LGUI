@@ -15,6 +15,31 @@
 #include "Core/Actor/UITextureActor.h"
 #include "Core/Actor/UIProceduralRectActor.h"
 #include "Core/Actor/UICustomMeshActor.h"
+// element templates: layout / canvas components composed onto a container actor
+#include "Core/ActorComponent/LGUICanvas.h"
+#include "Core/ActorComponent/UICanvasGroup.h"
+#include "Layout/UIPanelLayout_HorizontalBox.h"
+#include "Layout/UIPanelLayout_VerticalBox.h"
+#include "Layout/UIPanelLayout_UniformGrid.h"
+#include "Layout/UIPanelLayout_FlexibleGrid.h"
+#include "Layout/UIPanelLayout_Overlay.h"
+#include "Layout/UIHorizontalLayout.h"
+#include "Layout/UIVerticalLayout.h"
+#include "Layout/UIGridLayout.h"
+#include "Layout/UIRoundedLayout.h"
+#include "Layout/UISizeControlByAspectRatio.h"
+#include "Layout/UISizeControlByChildren.h"
+// extension element actor classes (mirrors the "Create UI Extension Element" menu)
+#include "Extensions/UIPolygon.h"
+#include "Extensions/UIPolygonLine.h"
+#include "Extensions/UIRing.h"
+#include "Extensions/UIStaticMesh.h"
+#include "Extensions/2DLineRenderer/UI2DLineRaw.h"
+#include "Extensions/UIWidget.h"
+#include "Extensions/UIRenderTarget.h"
+#include "Core/Actor/UIBackgroundBlurActor.h"
+#include "Core/Actor/UIBackgroundPixelateActor.h"
+#include "Core/Actor/UIFrameCaptureActor.h"
 
 #include "AssetRegistry/IAssetRegistry.h"
 #include "AssetThumbnail.h"
@@ -296,6 +321,7 @@ void SLGUIPrefabPalette::AddToFavoritesHeaderIfFavorite(const FItemPtr& InItem, 
 	auto FavItem = MakeShared<FLGUIPrefabPaletteItem>();
 	FavItem->Asset = InItem->Asset;
 	FavItem->ComponentClass = InItem->ComponentClass;
+	FavItem->Template = InItem->Template;
 	InOutFavoritesHeader->Children.Add(FavItem);
 }
 
@@ -311,31 +337,26 @@ void SLGUIPrefabPalette::CollectElementGroups(TArray<FItemPtr>& OutGroupHeaders,
 {
 	const bool bFilterActive = !SearchFilter.GetFilterText().IsEmpty();
 
-	// basic UI element actor classes -- same list as the "Create UI Element" menu. Dragging them
-	// spawns the actor under the drop target (the drop path already handles actor classes).
+	// group of plain actor-class rows. Dragging them spawns the actor under the drop
+	// target (the drop path already handles actor classes).
+	auto AddActorClassGroup = [&](const TCHAR* GroupName, std::initializer_list<UClass*> Classes)
 	{
-		UClass* BasicClasses[] =
-		{
-			AUIContainerActor::StaticClass(),
-			AUISpriteActor::StaticClass(),
-			AUITextActor::StaticClass(),
-			AUITextureActor::StaticClass(),
-			AUIProceduralRectActor::StaticClass(),
-			AUICustomMeshActor::StaticClass(),
-		};
 		FItemPtr Header;
-		for (UClass* Class : BasicClasses)
+		for (UClass* Class : Classes)
 		{
 			FString ShortName = Class->GetName();
 			ShortName.RemoveFromEnd(TEXT("Actor"));
-			if (bFilterActive && !SearchFilter.TestTextFilter(FBasicStringFilterExpressionContext(ShortName)))
+			// rows render the class DisplayName, so the search must match it too
+			if (bFilterActive
+				&& !SearchFilter.TestTextFilter(FBasicStringFilterExpressionContext(ShortName))
+				&& !SearchFilter.TestTextFilter(FBasicStringFilterExpressionContext(Class->GetDisplayNameText().ToString())))
 			{
 				continue;
 			}
 			if (!Header.IsValid())
 			{
 				Header = MakeShared<FLGUIPrefabPaletteItem>();
-				Header->CategoryName = TEXT("Basic");
+				Header->CategoryName = GroupName;
 				Header->bIsComponentGroup = true;
 			}
 			auto Item = MakeShared<FLGUIPrefabPaletteItem>();
@@ -347,7 +368,96 @@ void SLGUIPrefabPalette::CollectElementGroups(TArray<FItemPtr>& OutGroupHeaders,
 		{
 			OutGroupHeaders.Add(Header);
 		}
-	}
+	};
+
+	// group of composed element templates (actor class + components spawned as one unit),
+	// so a "Horizontal Box" is one drag instead of container-then-layout-component
+	auto AddTemplateGroup = [&](const TCHAR* GroupName, const TArray<FLGUIPaletteElementTemplate>& Templates)
+	{
+		FItemPtr Header;
+		for (const FLGUIPaletteElementTemplate& Template : Templates)
+		{
+			if (bFilterActive && !SearchFilter.TestTextFilter(FBasicStringFilterExpressionContext(Template.DisplayName.ToString())))
+			{
+				continue;
+			}
+			if (!Header.IsValid())
+			{
+				Header = MakeShared<FLGUIPrefabPaletteItem>();
+				Header->CategoryName = GroupName;
+				Header->bIsComponentGroup = true;
+			}
+			auto Item = MakeShared<FLGUIPrefabPaletteItem>();
+			Item->Template = MakeShared<FLGUIPaletteElementTemplate>(Template);
+			Header->Children.Add(Item);
+			AddToFavoritesHeaderIfFavorite(Item, InOutFavoritesHeader);
+		}
+		if (Header.IsValid())
+		{
+			OutGroupHeaders.Add(Header);
+		}
+	};
+
+	// basic UI element actor classes -- same list as the "Create UI Element" menu
+	AddActorClassGroup(TEXT("Basic"),
+		{
+			AUIContainerActor::StaticClass(),
+			AUISpriteActor::StaticClass(),
+			AUITextActor::StaticClass(),
+			AUITextureActor::StaticClass(),
+			AUIProceduralRectActor::StaticClass(),
+			AUICustomMeshActor::StaticClass(),
+		});
+
+	// UMG-Panel-style composed containers: container actor + slot-based panel layout.
+	// Named after their UMG counterparts so UMG users find them by muscle memory.
+	AddTemplateGroup(TEXT("Panels"),
+		{
+			{ LOCTEXT("Tpl_HorizontalBox", "Horizontal Box")
+			, LOCTEXT("Tpl_HorizontalBox_Tooltip", "UIContainer + Panel Layout Horizontal Box.\nArranges children in a row with per-child slot control (padding, size rule, alignment) -- LGUI's counterpart of UMG's Horizontal Box.")
+			, AUIContainerActor::StaticClass(), { UUIPanelLayout_HorizontalBox::StaticClass() } },
+			{ LOCTEXT("Tpl_VerticalBox", "Vertical Box")
+			, LOCTEXT("Tpl_VerticalBox_Tooltip", "UIContainer + Panel Layout Vertical Box.\nArranges children in a column with per-child slot control (padding, size rule, alignment) -- LGUI's counterpart of UMG's Vertical Box.")
+			, AUIContainerActor::StaticClass(), { UUIPanelLayout_VerticalBox::StaticClass() } },
+			{ LOCTEXT("Tpl_UniformGrid", "Uniform Grid")
+			, LOCTEXT("Tpl_UniformGrid_Tooltip", "UIContainer + Panel Layout Uniform Grid.\nArranges children in a grid where every cell is the same size -- LGUI's counterpart of UMG's Uniform Grid Panel.")
+			, AUIContainerActor::StaticClass(), { UUIPanelLayout_UniformGrid::StaticClass() } },
+			{ LOCTEXT("Tpl_FlexibleGrid", "Flexible Grid")
+			, LOCTEXT("Tpl_FlexibleGrid_Tooltip", "UIContainer + Panel Layout Flexible Grid.\nArranges children in a grid with individual row/column ratios -- LGUI's counterpart of UMG's Grid Panel.")
+			, AUIContainerActor::StaticClass(), { UUIPanelLayout_FlexibleGrid::StaticClass() } },
+			{ LOCTEXT("Tpl_Overlay", "Overlay")
+			, LOCTEXT("Tpl_Overlay_Tooltip", "UIContainer + Overlay Layout.\nStacks children on top of each other in the same rect; each child's slot controls padding and alignment (Fill stretches it) -- LGUI's counterpart of UMG's Overlay.")
+			, AUIContainerActor::StaticClass(), { UUIPanelLayout_Overlay::StaticClass() } },
+			{ LOCTEXT("Tpl_Canvas", "Canvas")
+			, LOCTEXT("Tpl_Canvas_Tooltip", "UIContainer + LGUICanvas (sub canvas).\nIts subtree renders as its own batch with its own sort order -- use it to isolate frequently-changing UI or to control render order, similar to dropping a Canvas Panel in UMG.")
+			, AUIContainerActor::StaticClass(), { ULGUICanvas::StaticClass() } },
+			{ LOCTEXT("Tpl_CanvasGroup", "Canvas Group")
+			, LOCTEXT("Tpl_CanvasGroup_Tooltip", "UIContainer + Canvas Group.\nGroups alpha and interactability for the whole subtree -- fade or disable a panel with one property, like UMG's Render Opacity / Is Enabled on a parent.")
+			, AUIContainerActor::StaticClass(), { UUICanvasGroup::StaticClass() } },
+		});
+
+	// uGUI-style layout containers: the parent controls all children uniformly (no per-slot setup)
+	AddTemplateGroup(TEXT("Layouts"),
+		{
+			{ LOCTEXT("Tpl_HorizontalLayout", "Horizontal Layout")
+			, LOCTEXT("Tpl_HorizontalLayout_Tooltip", "UIContainer + Horizontal Layout.\nArranges children in a row, uGUI style: spacing/padding set once on the parent, children need no slot setup.")
+			, AUIContainerActor::StaticClass(), { UUIHorizontalLayout::StaticClass() } },
+			{ LOCTEXT("Tpl_VerticalLayout", "Vertical Layout")
+			, LOCTEXT("Tpl_VerticalLayout_Tooltip", "UIContainer + Vertical Layout.\nArranges children in a column, uGUI style: spacing/padding set once on the parent, children need no slot setup.")
+			, AUIContainerActor::StaticClass(), { UUIVerticalLayout::StaticClass() } },
+			{ LOCTEXT("Tpl_GridLayout", "Grid Layout")
+			, LOCTEXT("Tpl_GridLayout_Tooltip", "UIContainer + Grid Layout.\nArranges children in a fixed-cell-size grid, uGUI style.")
+			, AUIContainerActor::StaticClass(), { UUIGridLayout::StaticClass() } },
+			{ LOCTEXT("Tpl_RoundedLayout", "Rounded Layout")
+			, LOCTEXT("Tpl_RoundedLayout_Tooltip", "UIContainer + Rounded Layout.\nArranges children evenly on a circle/arc (radial menus, dials).")
+			, AUIContainerActor::StaticClass(), { UUIRoundedLayout::StaticClass() } },
+			{ LOCTEXT("Tpl_SizeControlAspect", "Size Control (Aspect Ratio)")
+			, LOCTEXT("Tpl_SizeControlAspect_Tooltip", "UIContainer + Size Control By Aspect Ratio.\nKeeps this element's width/height locked to a ratio -- like UMG's Scale Box / Size Box aspect control.")
+			, AUIContainerActor::StaticClass(), { UUISizeControlByAspectRatio::StaticClass() } },
+			{ LOCTEXT("Tpl_SizeControlChildren", "Size Control (Fit Children)")
+			, LOCTEXT("Tpl_SizeControlChildren_Tooltip", "UIContainer + Size Control By Children.\nResizes this element to wrap its children -- a size-to-content box.")
+			, AUIContainerActor::StaticClass(), { UUISizeControlByChildren::StaticClass() } },
+		});
 
 	// built-in control prefabs (Button/Toggle/Slider/...) -- same list as the "Create UI Element"
 	// menu; they are prefab assets under /LGUI/Prefabs/, so the whole prefab drag/drop path applies
@@ -388,6 +498,26 @@ void SLGUIPrefabPalette::CollectElementGroups(TArray<FItemPtr>& OutGroupHeaders,
 			OutGroupHeaders.Add(Header);
 		}
 	}
+
+	// extension elements -- same list as the "Create UI Extension Element" menu
+	AddActorClassGroup(TEXT("Extensions"),
+		{
+			AUIPolygonActor::StaticClass(),
+			AUIPolygonLineActor::StaticClass(),
+			AUIRingActor::StaticClass(),
+			AUI2DLineActor::StaticClass(),
+			AUIStaticMeshActor::StaticClass(),
+			AUIWidgetActor::StaticClass(),
+			AUIRenderTargetActor::StaticClass(),
+		});
+
+	// post-process elements -- same list as the "Create UI Post Process" menu
+	AddActorClassGroup(TEXT("Post Process"),
+		{
+			AUIBackgroundBlurActor::StaticClass(),
+			AUIBackgroundPixelateActor::StaticClass(),
+			AUIFrameCaptureActor::StaticClass(),
+		});
 }
 
 void SLGUIPrefabPalette::CollectPrefabCategories(TArray<FItemPtr>& OutHeaders, FItemPtr& InOutFavoritesHeader)
@@ -532,13 +662,65 @@ TSharedRef<ITableRow> SLGUIPrefabPalette::OnGenerateRow(FItemPtr InItem, const T
 			];
 	}
 
-	if (InItem->IsComponentClass())
+	if (InItem->IsElementTemplate())
 	{
-		UClass* Class = InItem->ComponentClass.Get();
+		const FLGUIPaletteElementTemplate& Template = *InItem->Template;
+		// the component defines the element's identity (Horizontal Box = the layout), so
+		// its icon distinguishes rows better than the shared container-actor icon
+		UClass* IconClass = Template.ComponentClasses.Num() > 0 ? Template.ComponentClasses[0].Get() : Template.ActorClass.Get();
 		return SNew(STableRow<FItemPtr>, OwnerTable)
 			.Padding(FMargin(2, 2))
 			.OnDragDetected(FOnDragDetected::CreateSP(this, &SLGUIPrefabPalette::OnItemDragDetected, InItem))
-			.ToolTipText(FText::Format(LOCTEXT("ComponentRowTooltip", "{0}\nDrag onto an actor (viewport or outliner row) to add this component. Double-click adds it to the selected actor.")
+			.ToolTipText(FText::Format(LOCTEXT("TemplateRowTooltip", "{0}\n\nDrag into the viewport or onto an outliner row to create it there. Double-click creates it under the selected actor.")
+				, Template.Tooltip))
+			[
+				SNew(SHorizontalBox)
+				+ SHorizontalBox::Slot()
+				.AutoWidth()
+				.VAlign(VAlign_Center)
+				.Padding(2, 0, 6, 0)
+				[
+					SNew(SImage)
+					.Image(FSlateIconFinder::FindIconBrushForClass(IconClass))
+					.DesiredSizeOverride(FVector2D(16, 16))
+				]
+				+ SHorizontalBox::Slot()
+				.FillWidth(1.0f)
+				.VAlign(VAlign_Center)
+				[
+					SNew(STextBlock)
+					.Text(Template.DisplayName)
+				]
+				+ SHorizontalBox::Slot()
+				.AutoWidth()
+				.VAlign(VAlign_Center)
+				.Padding(4, 0)
+				[
+					SNew(SImage)
+					.Image(FAppStyle::Get().GetBrush("Icons.Star"))
+					.DesiredSizeOverride(FVector2D(10, 10))
+					.ColorAndOpacity(FSlateColor::UseSubduedForeground())
+					.Visibility_Lambda([this, WeakItem = TWeakPtr<FLGUIPrefabPaletteItem>(InItem)]()
+						{
+							auto Pinned = WeakItem.Pin();
+							return (Pinned.IsValid() && FavoritePaths.Contains(GetItemFavoriteKey(Pinned))) ? EVisibility::Visible : EVisibility::Collapsed;
+						})
+				]
+			];
+	}
+
+	if (InItem->IsComponentClass())
+	{
+		UClass* Class = InItem->ComponentClass.Get();
+		// this branch renders both component classes (Components tab) and UI element ACTOR
+		// classes (Elements tab Basic/Extensions/Post Process) -- word the hint accordingly
+		const bool bIsActorClass = Class->IsChildOf(AActor::StaticClass());
+		return SNew(STableRow<FItemPtr>, OwnerTable)
+			.Padding(FMargin(2, 2))
+			.OnDragDetected(FOnDragDetected::CreateSP(this, &SLGUIPrefabPalette::OnItemDragDetected, InItem))
+			.ToolTipText(FText::Format(bIsActorClass
+				? LOCTEXT("ElementRowTooltip", "{0}\nDrag into the viewport or onto an outliner row to create this element there. Double-click creates it under the selected actor.")
+				: LOCTEXT("ComponentRowTooltip", "{0}\nDrag onto an actor (viewport or outliner row) to add this component. Double-click adds it to the selected actor.")
 				, FText::FromString(Class->GetClassPathName().ToString())))
 			[
 				SNew(SHorizontalBox)
@@ -641,6 +823,12 @@ void SLGUIPrefabPalette::OnSearchTextChanged(const FText& InText)
 
 FReply SLGUIPrefabPalette::OnItemDragDetected(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent, FItemPtr InItem)
 {
+	if (InItem.IsValid() && InItem->IsElementTemplate())
+	{
+		// FAssetDragDropOp subclass: rides the whole existing asset drop pipeline, and
+		// template-aware drop sites read the display name off it to label the new actor
+		return FReply::Handled().BeginDragDrop(FLGUIElementTemplateDragDropOp::New(*InItem->Template));
+	}
 	if (InItem.IsValid() && InItem->IsComponentClass())
 	{
 		// a UClass is a UObject, so it travels as a standard asset drag; the drop path
@@ -658,7 +846,11 @@ FReply SLGUIPrefabPalette::OnItemDragDetected(const FGeometry& MyGeometry, const
 
 void SLGUIPrefabPalette::OnItemDoubleClick(FItemPtr InItem)
 {
-	if (InItem.IsValid() && InItem->IsComponentClass())
+	if (InItem.IsValid() && InItem->IsElementTemplate())
+	{
+		AddTemplateUnderSelectedActor(InItem);
+	}
+	else if (InItem.IsValid() && InItem->IsComponentClass())
 	{
 		AddComponentToSelectedActor(InItem);
 	}
@@ -685,9 +877,25 @@ void SLGUIPrefabPalette::AddComponentToSelectedActor(FItemPtr InItem)
 	}
 }
 
+void SLGUIPrefabPalette::AddTemplateUnderSelectedActor(FItemPtr InItem)
+{
+	if (!InItem.IsValid() || !InItem->IsElementTemplate())return;
+	if (auto PrefabEditor = PrefabEditorPtr.Pin())
+	{
+		// same shared drop path as a drag: validates the parent and handles the transaction
+		PrefabEditor->HandleAssetsDropOnParentActor(InItem->Template->BuildAssetList()
+			, PrefabEditor->GetCurrentSelectedActor(), InItem->Template->DisplayName);
+	}
+}
+
 FString SLGUIPrefabPalette::GetItemFavoriteKey(FItemPtr InItem)const
 {
 	if (!InItem.IsValid())return FString();
+	if (InItem->IsElementTemplate())
+	{
+		// templates have no asset/class path; their display name is stable and unique
+		return FString(TEXT("template:")) + InItem->Template->DisplayName.ToString();
+	}
 	if (InItem->IsComponentClass())
 	{
 		return InItem->ComponentClass->GetClassPathName().ToString();
@@ -705,6 +913,28 @@ TSharedPtr<SWidget> SLGUIPrefabPalette::OnContextMenuOpening()
 	FItemPtr Item = SelectedItems[0];
 
 	FMenuBuilder MenuBuilder(true, nullptr);
+
+	// element template rows: favorite toggle + create-under-selected
+	if (Item->IsElementTemplate())
+	{
+		MenuBuilder.BeginSection(NAME_None, LOCTEXT("TemplateSection", "Element"));
+		{
+			const bool bIsTemplateFavorite = FavoritePaths.Contains(GetItemFavoriteKey(Item));
+			MenuBuilder.AddMenuEntry(
+				bIsTemplateFavorite ? LOCTEXT("RemoveFromFavorites", "Remove from Favorites") : LOCTEXT("AddToFavorites", "Add to Favorites"),
+				LOCTEXT("ToggleFavoriteTooltip", "Favorited entries are pinned in the Favorites group at the top of the palette"),
+				FSlateIcon(FAppStyle::GetAppStyleSetName(), "Icons.Star"),
+				FUIAction(FExecuteAction::CreateSP(this, &SLGUIPrefabPalette::ToggleFavorite, Item)));
+
+			MenuBuilder.AddMenuEntry(
+				LOCTEXT("CreateUnderSelectedActor", "Create under Selected Actor"),
+				LOCTEXT("CreateUnderSelectedActorTooltip", "Create this element under the actor selected in the outliner (same as double-click)"),
+				FSlateIcon(FAppStyle::GetAppStyleSetName(), "Icons.Plus"),
+				FUIAction(FExecuteAction::CreateSP(this, &SLGUIPrefabPalette::AddTemplateUnderSelectedActor, Item)));
+		}
+		MenuBuilder.EndSection();
+		return MenuBuilder.MakeWidget();
+	}
 
 	// component class rows get a reduced menu: favorite toggle + add-to-selected
 	if (Item->IsComponentClass())

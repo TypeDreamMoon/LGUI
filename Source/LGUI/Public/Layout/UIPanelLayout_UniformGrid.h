@@ -10,7 +10,7 @@
 /**
  * Layout child elements side by side horizontally
  */
-UCLASS( ClassGroup=(LGUI), meta=(BlueprintSpawnableComponent) )
+UCLASS( ClassGroup=(LGUI), meta=(BlueprintSpawnableComponent, DisplayName = "Uniform Grid Layout") )
 class LGUI_API UUIPanelLayout_UniformGrid : public UUIPanelLayoutBase
 {
 	GENERATED_BODY()
@@ -59,7 +59,7 @@ protected:
 	virtual void OnUIChildDimensionsChanged(UUIItem* child, bool horizontalPositionChanged, bool verticalPositionChanged, bool widthChanged, bool heightChanged)override;
 };
 
-UCLASS(ClassGroup = LGUI, Blueprintable)
+UCLASS(ClassGroup = LGUI, Blueprintable, meta = (DisplayName = "Uniform Grid Slot"))
 class LGUI_API UUIPanelLayout_UniformGrid_Slot : public UUIPanelLayoutSlotBase
 {
 	GENERATED_BODY()

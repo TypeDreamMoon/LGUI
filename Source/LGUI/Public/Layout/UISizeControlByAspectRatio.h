@@ -20,7 +20,7 @@ enum class EUISizeControlByAspectRatioMode :uint8
 /**
  * Use aspect ratio to control with and height.
  */
-UCLASS( ClassGroup=(LGUI), meta=(BlueprintSpawnableComponent) )
+UCLASS( ClassGroup=(LGUI), meta=(BlueprintSpawnableComponent, DisplayName = "Size Control by Aspect Ratio") )
 class LGUI_API UUISizeControlByAspectRatio : public UUILayoutWithAnimation
 {
 	GENERATED_BODY()
