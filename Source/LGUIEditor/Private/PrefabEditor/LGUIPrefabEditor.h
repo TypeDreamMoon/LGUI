@@ -4,6 +4,7 @@
 #include "UObject/GCObject.h"
 #include "Toolkits/IToolkitHost.h"
 #include "Toolkits/AssetEditorToolkit.h"
+#include "EditorUndoClient.h"
 #include "LGUIPrefabEditorScene.h"
 #pragma once
 
@@ -25,10 +26,19 @@ struct FLGUISubPrefabData;
  */
 class FLGUIPrefabEditor : public FAssetEditorToolkit
 	, public FGCObject
+	, public FEditorUndoClient
 {
 public:
 	FLGUIPrefabEditor();
 	~FLGUIPrefabEditor();
+
+	// FEditorUndoClient interface: keep the editor consistent after global undo/redo.
+	// Without this, undoing after Apply leaves the scene rolled back while the dirty flag
+	// still says "clean", so closing the window silently loses the undone state.
+	virtual bool MatchesContext(const FTransactionContext& InContext, const TArray<TPair<UObject*, FTransactionObjectEvent>>& TransactionObjectContexts) const override;
+	virtual void PostUndo(bool bSuccess) override;
+	virtual void PostRedo(bool bSuccess) override;
+	// End FEditorUndoClient interface
 
 	// IToolkit interface
 	virtual void RegisterTabSpawners(const TSharedRef<class FTabManager>& TabManager) override;
@@ -62,12 +72,48 @@ public:
 
 	/** Try to handle a drag-drop operation */
 	FReply TryHandleAssetDragDropOperation(const FDragDropEvent& DragDropEvent);
+	/**
+	 * Create actors / sub prefabs from dropped assets, attached under the given parent actor.
+	 * Shared by the viewport drop (parent = selected actor) and the outliner row drop (parent = drop target row).
+	 */
+	FReply HandleAssetsDropOnParentActor(const TArray<struct FAssetData>& DroppedAssetData, AActor* InParentActor);
 
 	FLGUIPrefabEditorScene& GetPreviewScene();
 	UWorld* GetWorld();
 	ULGUIPrefab* GetPrefabBeingEdited()const { return PrefabBeingEdited; }
+	AActor* GetCurrentSelectedActor()const { return CurrentSelectedActor.Get(); }
 
-	void DeleteActors(const TArray<TWeakObjectPtr<AActor>>& InSelectedActorArray);
+	/**
+	 * Delete actors (with validation: root, root agent and sub-prefab members are refused).
+	 * @param bKeepChildren  When true, direct child actors that are not themselves being deleted
+	 *                       are reparented to the deleted actor's parent instead of being destroyed.
+	 *                       (Sub prefab roots always take their whole prefab with them.)
+	 */
+	void DeleteActors(const TArray<TWeakObjectPtr<AActor>>& InSelectedActorArray, bool bKeepChildren = false);
+	/** Delete the currently selected actors, reparenting their children (Shift+Delete). */
+	void DeleteSelectedActors_KeepChildren();
+
+	/** UMG-designer-style layout commands operating on the selected UI elements (world space, UI plane = world Y/Z). */
+	enum class EAlignType : uint8 { Left, HCenter, Right, Top, VMiddle, Bottom };
+	void AlignSelectedUIItems(EAlignType InType);
+	void DistributeSelectedUIItems(bool bHorizontal);
+	/** Selected UUIItem roots in this editor's world (root agent excluded). */
+	TArray<class UUIItem*> GetSelectedUIItems()const;
+
+	/**
+	 * UMG-style "Wrap With": spawn a new UI actor of the given class, size/position it to the
+	 * union rect of the selected elements, insert it at their hierarchy position and reparent
+	 * them into it (world transforms kept). Selection must share a parent; sub prefab internals
+	 * and the prefab root cannot be wrapped.
+	 */
+	void WrapSelectedUIItems(TSubclassOf<AActor> WrapperClass);
+
+	/**
+	 * Scan every FLGUIEventDelegate on the live actor tree and warn (notification) about bindings
+	 * whose target no longer resolves (renamed component, deleted function). Bindings locate their
+	 * target by actor + component NAME + function NAME, so renames break them silently at runtime.
+	 */
+	void ValidateEventBindings();
 
 	static FLGUIPrefabEditor* GetEditorForPrefabIfValid(ULGUIPrefab* InPrefab);
 	static ULGUIPrefabHelperObject* GetEditorPrefabHelperObjectForActor(AActor* InActor);
@@ -99,6 +145,7 @@ private:
 	TSharedPtr<SLGUIPrefabEditorDetails> DetailsPtr;
 	TSharedPtr<FLGUIPrefabEditorOutliner> OutlinerPtr;
 	TSharedPtr<SLGUIPrefabRawDataViewer> PrefabRawDataViewer;
+	TSharedPtr<class SLGUIPrefabPalette> PalettePtr;
 
 	TWeakObjectPtr<AActor> CurrentSelectedActor;
 
@@ -120,8 +167,24 @@ private:
 	TSharedRef<SDockTab> SpawnTab_Details(const FSpawnTabArgs& Args);
 	TSharedRef<SDockTab> SpawnTab_Outliner(const FSpawnTabArgs& Args);
 	TSharedRef<SDockTab> SpawnTab_PrefabRawDataViewer(const FSpawnTabArgs& Args);
+	TSharedRef<SDockTab> SpawnTab_PrefabPalette(const FSpawnTabArgs& Args);
 
 	bool IsFilteredActor(const AActor* Actor);
 	void OnOutlinerPickedChanged(AActor* Actor);
 	void OnOutlinerActorDoubleClick(AActor* Actor);
+	void HandleUndoRedo();
+	/**
+	 * Editor-scope isolation for clipboard commands: deselect actors that belong to other worlds
+	 * (other prefab editors / the level editor) so the shared static tools only see this editor's
+	 * selection, and paste lands in this world instead of wherever a stray selection points.
+	 */
+	void RestrictSelectionToThisWorld();
+	bool HasSelectionInThisWorld()const;
+	/**
+	 * Export a stable, human-readable text snapshot of the live actor tree (hierarchy +
+	 * non-default properties; sub prefabs as references with their override list) to
+	 * <Project>/PrefabTextSnapshots/<asset path>.txt -- prefab binary can't be diffed,
+	 * this can. Gated by ULGUIPrefabSettings::bExportTextSnapshotOnApply.
+	 */
+	void ExportTextSnapshot();
 };

@@ -83,6 +83,7 @@ private:
 	
 	FDelegateHandle SequenceEditorHandle;
 	FDelegateHandle OnInitializeSequenceHandle;
+	FDelegateHandle PrefabOverrideRowExtensionHandle;
 	FName LGUIPrefabSequenceComponentName;
 	static void OnInitializeSequence(class ULGUIPrefabSequence* Sequence);
 	FDelegateHandle LGUIMaterialTrackEditorCreateTrackEditorHandle;

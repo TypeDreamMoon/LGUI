@@ -7,6 +7,7 @@
 #include "LGUIPrefabEditorDetails.h"
 #include "LGUIPrefabEditorOutliner.h"
 #include "LGUIPrefabRawDataViewer.h"
+#include "SLGUIPrefabPalette.h"
 #include "UnrealEdGlobals.h"
 #include "EditorModeManager.h"
 #include "EngineUtils.h"
@@ -15,8 +16,15 @@
 #include "Engine/StaticMeshActor.h"
 #include "AssetSelection.h"
 #include "DragAndDrop/AssetDragDropOp.h"
+#include "Kismet2/ComponentEditorUtils.h"
 #include "Misc/FeedbackContext.h"
+#include "ScopedTransaction.h"
+#include "Core/ActorComponent/UIItem.h"
+#include "Event/LGUIEventDelegate.h"
+#include "PrefabSystem/LGUIPrefabSettings.h"
+#include "Misc/FileHelper.h"
 #include "LGUIPrefabEditorCommand.h"
+#include "Framework/Commands/GenericCommands.h"
 #include "Framework/MultiBox/MultiBoxExtender.h"
 #include "LGUIEditorTools.h"
 #include "Engine/Selection.h"
@@ -34,7 +42,10 @@
 
 #define LOCTEXT_NAMESPACE "LGUIPrefabEditor"
 
+#include "LGUI.h"//LGUI_CAN_DISABLE_OPTIMIZATION
+#if LGUI_CAN_DISABLE_OPTIMIZATION
 UE_DISABLE_OPTIMIZATION
+#endif
 
 const FName PrefabEditorAppName = FName(TEXT("LGUIPrefabEditorApp"));
 
@@ -47,12 +58,14 @@ struct FLGUIPrefabEditorTabs
 	static const FName ViewportID;
 	static const FName OutlinerID;
 	static const FName PrefabRawDataViewerID;
+	static const FName PrefabPaletteID;
 };
 
 const FName FLGUIPrefabEditorTabs::DetailsID(TEXT("Details"));
 const FName FLGUIPrefabEditorTabs::ViewportID(TEXT("Viewport"));
 const FName FLGUIPrefabEditorTabs::OutlinerID(TEXT("Outliner"));
 const FName FLGUIPrefabEditorTabs::PrefabRawDataViewerID(TEXT("PrefabRawDataViewer"));
+const FName FLGUIPrefabEditorTabs::PrefabPaletteID(TEXT("PrefabPalette"));
 
 FName GetPrefabWorldName()
 {
@@ -67,15 +80,231 @@ FLGUIPrefabEditor::FLGUIPrefabEditor()
 }
 FLGUIPrefabEditor::~FLGUIPrefabEditor()
 {
+	GEditor->UnregisterForUndo(this);
+
 	PrefabHelperObject->ConditionalBeginDestroy();
 	PrefabHelperObject = nullptr;
 
 	LGUIPrefabEditorInstanceCollection.Remove(this);
 
-	GEditor->SelectNone(true, true);
+	// deselect only actors belonging to this prefab's world -- a plain SelectNone here used to
+	// clobber the level editor's (and other prefab editors') selection on every window close
+	{
+		TArray<AActor*> ActorsToDeselect;
+		for (FSelectionIterator It(GEditor->GetSelectedActorIterator()); It; ++It)
+		{
+			if (AActor* Actor = Cast<AActor>(*It))
+			{
+				if (Actor->GetWorld() == PreviewScene.GetWorld())
+				{
+					ActorsToDeselect.Add(Actor);
+				}
+			}
+		}
+		if (ActorsToDeselect.Num() > 0)
+		{
+			for (auto& Actor : ActorsToDeselect)
+			{
+				GEditor->SelectActor(Actor, false, false);
+			}
+			GEditor->NoteSelectionChange();
+		}
+	}
 
 	ULGUIPrefabManagerObject::MarkBroadcastLevelActorListChanged();
 	FLGUIEditorModule::Get().GetNativeSceneOutlinerExtension()->Restore();
+}
+
+bool FLGUIPrefabEditor::MatchesContext(const FTransactionContext& InContext, const TArray<TPair<UObject*, FTransactionObjectEvent>>& TransactionObjectContexts) const
+{
+	// only react to transactions that touch this editor's world or its prefab bookkeeping --
+	// otherwise every unrelated level-editor undo would dirty this prefab
+	const UWorld* PrefabWorld = PreviewScene.GetWorld();
+	for (auto& Pair : TransactionObjectContexts)
+	{
+		if (UObject* Object = Pair.Key)
+		{
+			if (Object == PrefabHelperObject || Object == PrefabBeingEdited)
+			{
+				return true;
+			}
+			if (Object->GetTypedOuter<UWorld>() == PrefabWorld)
+			{
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
+void FLGUIPrefabEditor::PostUndo(bool bSuccess)
+{
+	if (bSuccess)
+	{
+		HandleUndoRedo();
+	}
+}
+
+void FLGUIPrefabEditor::PostRedo(bool bSuccess)
+{
+	if (bSuccess)
+	{
+		HandleUndoRedo();
+	}
+}
+
+void FLGUIPrefabEditor::HandleUndoRedo()
+{
+	// conservative dirty policy: any undo/redo that touched this prefab marks it dirty.
+	// An unnecessary re-Apply is harmless; a missed one silently loses the undone state
+	// (the classic trap: edit -> Apply -> Ctrl+Z left the flag "clean" while the scene
+	// no longer matched the asset).
+	PrefabHelperObject->SetAnythingDirty();
+	PrefabHelperObject->CleanupInvalidSubPrefab();
+	if (OutlinerPtr.IsValid())
+	{
+		OutlinerPtr->FullRefresh();
+	}
+}
+
+void FLGUIPrefabEditor::RestrictSelectionToThisWorld()
+{
+	TArray<AActor*> ActorsToDeselect;
+	for (FSelectionIterator It(GEditor->GetSelectedActorIterator()); It; ++It)
+	{
+		if (AActor* Actor = Cast<AActor>(*It))
+		{
+			if (Actor->GetWorld() != PreviewScene.GetWorld())
+			{
+				ActorsToDeselect.Add(Actor);
+			}
+		}
+	}
+	if (ActorsToDeselect.Num() > 0)
+	{
+		for (auto& Actor : ActorsToDeselect)
+		{
+			GEditor->SelectActor(Actor, false, false);
+		}
+		GEditor->NoteSelectionChange();
+	}
+}
+
+bool FLGUIPrefabEditor::HasSelectionInThisWorld()const
+{
+	for (FSelectionIterator It(GEditor->GetSelectedActorIterator()); It; ++It)
+	{
+		if (AActor* Actor = Cast<AActor>(*It))
+		{
+			if (Actor->GetWorld() == PreviewScene.GetWorld())
+			{
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
+namespace LGUIPrefabTextSnapshotLocal
+{
+	static void AppendObjectProperties(FString& Out, UObject* Object, int32 Indent)
+	{
+		const FString IndentStr = FString::ChrN(Indent, TEXT('\t'));
+		UObject* CDO = Object->GetClass()->GetDefaultObject();
+		// stable order: property name
+		TArray<FProperty*> Properties;
+		for (TFieldIterator<FProperty> It(Object->GetClass()); It; ++It)
+		{
+			if (It->HasAnyPropertyFlags(CPF_Transient | CPF_DuplicateTransient | CPF_NonPIEDuplicateTransient | CPF_Deprecated))continue;
+			if (It->IsA<FMulticastDelegateProperty>() || It->IsA<FDelegateProperty>())continue;
+			Properties.Add(*It);
+		}
+		Properties.Sort([](const FProperty& A, const FProperty& B) { return A.GetFName().LexicalLess(B.GetFName()); });
+		for (auto& Property : Properties)
+		{
+			// only export values that differ from the class default -- that IS the diff
+			if (Property->Identical_InContainer(Object, CDO))continue;
+			FString ValueText;
+			Property->ExportTextItem_InContainer(ValueText, Object, CDO, nullptr, PPF_SimpleObjectText);
+			Out += FString::Printf(TEXT("%s%s = %s\n"), *IndentStr, *Property->GetName(), *ValueText);
+		}
+	}
+
+	static void AppendActorRecursive(FString& Out, AActor* Actor, ULGUIPrefabHelperObject* HelperObject, int32 Indent)
+	{
+		const FString IndentStr = FString::ChrN(Indent, TEXT('\t'));
+
+		// sub prefab root: reference + overrides, don't expand its internals (they belong to the sub asset)
+		if (HelperObject->SubPrefabMap.Contains(Actor))
+		{
+			const FLGUISubPrefabData& SubPrefabData = HelperObject->SubPrefabMap[Actor];
+			Out += FString::Printf(TEXT("%sSubPrefab \"%s\" <%s>\n"), *IndentStr, *Actor->GetActorLabel()
+				, SubPrefabData.PrefabAsset != nullptr ? *SubPrefabData.PrefabAsset->GetPathName() : TEXT("MISSING"));
+			// stable order for overrides: object name + sorted property names
+			TArray<FString> OverrideLines;
+			for (auto& Item : SubPrefabData.ObjectOverrideParameterArray)
+			{
+				if (!Item.Object.IsValid())continue;
+				TArray<FName> Names = Item.MemberPropertyNames;
+				Names.Sort([](const FName& A, const FName& B) { return A.LexicalLess(B); });
+				for (auto& Name : Names)
+				{
+					OverrideLines.Add(FString::Printf(TEXT("%s\tOverride %s.%s\n"), *IndentStr, *Item.Object->GetName(), *Name.ToString()));
+				}
+			}
+			OverrideLines.Sort();
+			for (auto& Line : OverrideLines)
+			{
+				Out += Line;
+			}
+			return;
+		}
+
+		Out += FString::Printf(TEXT("%sActor \"%s\" (%s)\n"), *IndentStr, *Actor->GetActorLabel(), *Actor->GetClass()->GetName());
+		AppendObjectProperties(Out, Actor, Indent + 1);
+		// components in stable name order
+		TArray<UActorComponent*> Components;
+		for (UActorComponent* Comp : Actor->GetComponents())
+		{
+			if (Comp != nullptr && !Comp->IsVisualizationComponent())Components.Add(Comp);
+		}
+		Components.Sort([](const UActorComponent& A, const UActorComponent& B) { return A.GetFName().LexicalLess(B.GetFName()); });
+		for (auto& Comp : Components)
+		{
+			Out += FString::Printf(TEXT("%s\tComponent \"%s\" (%s)\n"), *IndentStr, *Comp->GetName(), *Comp->GetClass()->GetName());
+			AppendObjectProperties(Out, Comp, Indent + 2);
+		}
+		// children in stable label order (hierarchyIndex is itself a property and already exported)
+		TArray<AActor*> ChildActors;
+		Actor->GetAttachedActors(ChildActors);
+		ChildActors.Sort([](const AActor& A, const AActor& B) { return A.GetActorLabel() < B.GetActorLabel(); });
+		for (auto& Child : ChildActors)
+		{
+			AppendActorRecursive(Out, Child, HelperObject, Indent + 1);
+		}
+	}
+}
+
+void FLGUIPrefabEditor::ExportTextSnapshot()
+{
+	if (!IsValid(PrefabHelperObject->LoadedRootActor))return;
+
+	FString Content;
+	Content += FString::Printf(TEXT("// LGUI prefab text snapshot -- generated on Apply for diff/review, not used at load time.\n// Asset: %s\n\n"), *PrefabBeingEdited->GetPathName());
+	LGUIPrefabTextSnapshotLocal::AppendActorRecursive(Content, PrefabHelperObject->LoadedRootActor, PrefabHelperObject, 0);
+
+	// mirror the asset's package path under <Project>/PrefabTextSnapshots/
+	FString PackageName = PrefabBeingEdited->GetOutermost()->GetName();// e.g. /Game/UI/BP_SettingsPanel
+	PackageName.RemoveFromStart(TEXT("/"));
+	const FString FilePath = FPaths::ProjectDir() / TEXT("PrefabTextSnapshots") / PackageName + TEXT(".txt");
+	if (FFileHelper::SaveStringToFile(Content, *FilePath, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))
+	{
+		UE_LOG(LGUIEditor, Log, TEXT("[LGUI Prefab] text snapshot saved: %s"), *FilePath);
+	}
+	else
+	{
+		UE_LOG(LGUIEditor, Warning, TEXT("[LGUI Prefab] failed to save text snapshot: %s"), *FilePath);
+	}
 }
 
 FLGUIPrefabEditor* FLGUIPrefabEditor::GetEditorForPrefabIfValid(ULGUIPrefab* InPrefab)
@@ -262,15 +491,25 @@ bool FLGUIPrefabEditor::OnRequestClose()
 {
 	if (GetAnythingDirty())
 	{
-		auto WarningMsg = LOCTEXT("LoseDataOnCloseEditor", "Are you sure you want to close prefab editor window? Property will lose if not hit Apply!");
-		auto Result = FMessageDialog::Open(EAppMsgType::YesNo, WarningMsg);
-		if (Result == EAppReturnType::Yes)
+		// three-way close, like other UE asset editors: save, discard, or stay open.
+		// The old dialog only offered discard/cancel -- there was no way to "apply and close".
+		auto WarningMsg = LOCTEXT("LoseDataOnCloseEditor", "This prefab has unapplied changes.\n\nYes: Apply changes and close\nNo: Discard changes and close\nCancel: Keep editing");
+		auto Result = FMessageDialog::Open(EAppMsgType::YesNoCancel, WarningMsg);
+		switch (Result)
+		{
+		case EAppReturnType::Yes:
+		{
+			OnApply();
+			return true;
+		}
+		case EAppReturnType::No:
 		{
 			return true;
 		}
-		else
+		default:
 		{
 			return false;
+		}
 		}
 	}
 	return true;
@@ -299,9 +538,15 @@ void FLGUIPrefabEditor::RegisterTabSpawners(const TSharedRef<FTabManager>& InTab
 		.SetIcon(FSlateIcon(FAppStyle::GetAppStyleSetName(), "LevelEditor.Tabs.Outliner"));
 
 	InTabManager->RegisterTabSpawner(FLGUIPrefabEditorTabs::PrefabRawDataViewerID, FOnSpawnTab::CreateSP(this, &FLGUIPrefabEditor::SpawnTab_PrefabRawDataViewer))
-		.SetDisplayName(LOCTEXT("PrefabRawDataViewerTabLabel", "PrefabRawDataViewer"))
+		.SetDisplayName(LOCTEXT("PrefabRawDataViewerTabLabel", "Prefab Settings"))
 		.SetGroup(WorkspaceMenuCategoryRef)
+		.SetIcon(FSlateIcon(FAppStyle::GetAppStyleSetName(), "Icons.Settings"))
 		;
+
+	InTabManager->RegisterTabSpawner(FLGUIPrefabEditorTabs::PrefabPaletteID, FOnSpawnTab::CreateSP(this, &FLGUIPrefabEditor::SpawnTab_PrefabPalette))
+		.SetDisplayName(LOCTEXT("PrefabPaletteTabLabel", "Prefab Palette"))
+		.SetGroup(WorkspaceMenuCategoryRef)
+		.SetIcon(FSlateIcon(FAppStyle::GetAppStyleSetName(), "Kismet.Tabs.Palette"));
 }
 void FLGUIPrefabEditor::UnregisterTabSpawners(const TSharedRef<FTabManager>& InTabManager)
 {
@@ -311,6 +556,7 @@ void FLGUIPrefabEditor::UnregisterTabSpawners(const TSharedRef<FTabManager>& InT
 	InTabManager->UnregisterTabSpawner(FLGUIPrefabEditorTabs::DetailsID);
 	InTabManager->UnregisterTabSpawner(FLGUIPrefabEditorTabs::OutlinerID);
 	InTabManager->UnregisterTabSpawner(FLGUIPrefabEditorTabs::PrefabRawDataViewerID);
+	InTabManager->UnregisterTabSpawner(FLGUIPrefabEditorTabs::PrefabPaletteID);
 }
 
 void FLGUIPrefabEditor::InitPrefabEditor(const EToolkitMode::Type Mode, const TSharedPtr<IToolkitHost >& InitToolkitHost, ULGUIPrefab* InPrefab)
@@ -347,6 +593,8 @@ void FLGUIPrefabEditor::InitPrefabEditor(const EToolkitMode::Type Mode, const TS
 
 	PrefabRawDataViewer = SNew(SLGUIPrefabRawDataViewer, PrefabEditorPtr, PrefabBeingEdited);
 
+	PalettePtr = SNew(SLGUIPrefabPalette, PrefabEditorPtr);
+
 	auto UnexpendActorGuidSet = PrefabBeingEdited->PrefabDataForPrefabEditor.UnexpendActorSet;
 	TSet<AActor*> UnexpendActorSet;
 	for (auto& ItemActorGuid : UnexpendActorGuidSet)
@@ -367,9 +615,10 @@ void FLGUIPrefabEditor::InitPrefabEditor(const EToolkitMode::Type Mode, const TS
 
 	BindCommands();
 	ExtendToolbar();
+	GEditor->RegisterForUndo(this);
 
 	// Default layout
-	const TSharedRef<FTabManager::FLayout> StandaloneDefaultLayout = FTabManager::NewLayout("Standalone_LGUIPrefabEditor_Layout_v1")
+	const TSharedRef<FTabManager::FLayout> StandaloneDefaultLayout = FTabManager::NewLayout("Standalone_LGUIPrefabEditor_Layout_v3")
 		->AddArea
 		(
 			FTabManager::NewPrimaryArea()
@@ -384,6 +633,8 @@ void FLGUIPrefabEditor::InitPrefabEditor(const EToolkitMode::Type Mode, const TS
 					FTabManager::NewStack()
 					->SetSizeCoefficient(0.2f)
 					->AddTab(FLGUIPrefabEditorTabs::OutlinerID, ETabState::OpenedTab)
+					->AddTab(FLGUIPrefabEditorTabs::PrefabPaletteID, ETabState::OpenedTab)
+					->SetForegroundTab(FLGUIPrefabEditorTabs::OutlinerID)
 				)
 				->Split
 				(
@@ -396,6 +647,8 @@ void FLGUIPrefabEditor::InitPrefabEditor(const EToolkitMode::Type Mode, const TS
 					FTabManager::NewStack()
 					->SetSizeCoefficient(0.2f)
 					->AddTab(FLGUIPrefabEditorTabs::DetailsID, ETabState::OpenedTab)
+					->AddTab(FLGUIPrefabEditorTabs::PrefabRawDataViewerID, ETabState::OpenedTab)
+					->SetForegroundTab(FLGUIPrefabEditorTabs::DetailsID)
 				)
 			)
 		);
@@ -440,7 +693,7 @@ void FLGUIPrefabEditor::GetInitialViewLocationAndRotation(FVector& OutLocation, 
 	}
 }
 
-void FLGUIPrefabEditor::DeleteActors(const TArray<TWeakObjectPtr<AActor>>& InSelectedActorArray)
+void FLGUIPrefabEditor::DeleteActors(const TArray<TWeakObjectPtr<AActor>>& InSelectedActorArray, bool bKeepChildren)
 {
 	for (auto Item : InSelectedActorArray)
 	{
@@ -472,7 +725,433 @@ void FLGUIPrefabEditor::DeleteActors(const TArray<TWeakObjectPtr<AActor>>& InSel
 			SelectedActorArray.Add(Item.Get());
 		}
 	}
-	LGUIEditorTools::DeleteActors_Impl(SelectedActorArray);
+
+	if (bKeepChildren)
+	{
+		// reparent surviving children to the deleted actor's parent before destroying, so they
+		// stay in the hierarchy (same transaction as the delete below via nested transactions)
+		GEditor->BeginTransaction(LOCTEXT("DeleteActorsKeepChildren_Transaction", "LGUI Delete Actors (Keep Children)"));
+		for (auto& ActorToDelete : SelectedActorArray)
+		{
+			// a sub prefab root always takes its whole prefab along -- its children are prefab
+			// members and must not be pulled out of the prefab
+			if (PrefabHelperObject->SubPrefabMap.Contains(ActorToDelete))
+			{
+				continue;
+			}
+			AActor* NewParent = ActorToDelete->GetAttachParentActor();
+			if (NewParent == nullptr)
+			{
+				continue;
+			}
+			TArray<AActor*> ChildActors;
+			ActorToDelete->GetAttachedActors(ChildActors);
+			for (auto& Child : ChildActors)
+			{
+				if (SelectedActorArray.Contains(Child))continue;//also being deleted
+				if (auto ChildRoot = Child->GetRootComponent())
+				{
+					Child->Modify();
+					ChildRoot->AttachToComponent(NewParent->GetRootComponent(), FAttachmentTransformRules::KeepWorldTransform);
+				}
+			}
+		}
+		LGUIEditorTools::DeleteActors_Impl(SelectedActorArray);
+		GEditor->EndTransaction();
+	}
+	else
+	{
+		LGUIEditorTools::DeleteActors_Impl(SelectedActorArray);
+	}
+}
+
+namespace LGUIPrefabEditorAlignLocal
+{
+	// world-space rect of a UIItem on the UI plane (world Y = horizontal, world Z = vertical)
+	struct FWorldRect
+	{
+		UUIItem* Item = nullptr;
+		double MinY = 0, MaxY = 0, MinZ = 0, MaxZ = 0;
+		double CenterY()const { return (MinY + MaxY) * 0.5; }
+		double CenterZ()const { return (MinZ + MaxZ) * 0.5; }
+	};
+
+	static FWorldRect ComputeWorldRect(UUIItem* InItem)
+	{
+		const auto& Transform = InItem->GetComponentTransform();
+		const FVector Corners[4] =
+		{
+			Transform.TransformPosition(FVector(0, InItem->GetLocalSpaceLeft(), InItem->GetLocalSpaceBottom())),
+			Transform.TransformPosition(FVector(0, InItem->GetLocalSpaceRight(), InItem->GetLocalSpaceBottom())),
+			Transform.TransformPosition(FVector(0, InItem->GetLocalSpaceLeft(), InItem->GetLocalSpaceTop())),
+			Transform.TransformPosition(FVector(0, InItem->GetLocalSpaceRight(), InItem->GetLocalSpaceTop())),
+		};
+		FWorldRect Result;
+		Result.Item = InItem;
+		Result.MinY = Result.MaxY = Corners[0].Y;
+		Result.MinZ = Result.MaxZ = Corners[0].Z;
+		for (int i = 1; i < 4; i++)
+		{
+			Result.MinY = FMath::Min(Result.MinY, Corners[i].Y);
+			Result.MaxY = FMath::Max(Result.MaxY, Corners[i].Y);
+			Result.MinZ = FMath::Min(Result.MinZ, Corners[i].Z);
+			Result.MaxZ = FMath::Max(Result.MaxZ, Corners[i].Z);
+		}
+		return Result;
+	}
+
+	// apply a world-space delta on the UI plane to the item's AnchoredPosition
+	static void ApplyWorldDelta(UUIItem* InItem, double InDeltaY, double InDeltaZ)
+	{
+		if (FMath::IsNearlyZero(InDeltaY) && FMath::IsNearlyZero(InDeltaZ))return;
+		FVector LocalDelta(0, InDeltaY, InDeltaZ);
+		if (auto Parent = InItem->GetParentUIItem())
+		{
+			LocalDelta = Parent->GetComponentTransform().InverseTransformVector(FVector(0, InDeltaY, InDeltaZ));
+		}
+		InItem->Modify();
+		InItem->SetAnchoredPosition(InItem->GetAnchoredPosition() + FVector2D(LocalDelta.Y, LocalDelta.Z));
+	}
+}
+
+TArray<UUIItem*> FLGUIPrefabEditor::GetSelectedUIItems()const
+{
+	TArray<UUIItem*> Result;
+	for (FSelectionIterator It(GEditor->GetSelectedActorIterator()); It; ++It)
+	{
+		if (AActor* Actor = Cast<AActor>(*It))
+		{
+			if (Actor->GetWorld() != PreviewScene.GetWorld())continue;
+			if (Actor == PreviewScene.GetRootAgentActor())continue;
+			if (auto UIItem = Cast<UUIItem>(Actor->GetRootComponent()))
+			{
+				Result.Add(UIItem);
+			}
+		}
+	}
+	return Result;
+}
+
+void FLGUIPrefabEditor::AlignSelectedUIItems(EAlignType InType)
+{
+	using namespace LGUIPrefabEditorAlignLocal;
+	auto Items = GetSelectedUIItems();
+	if (Items.Num() < 2)return;
+
+	TArray<FWorldRect> Rects;
+	for (auto& Item : Items)
+	{
+		Rects.Add(ComputeWorldRect(Item));
+	}
+	// selection bounds
+	double MinY = Rects[0].MinY, MaxY = Rects[0].MaxY, MinZ = Rects[0].MinZ, MaxZ = Rects[0].MaxZ;
+	for (auto& Rect : Rects)
+	{
+		MinY = FMath::Min(MinY, Rect.MinY); MaxY = FMath::Max(MaxY, Rect.MaxY);
+		MinZ = FMath::Min(MinZ, Rect.MinZ); MaxZ = FMath::Max(MaxZ, Rect.MaxZ);
+	}
+
+	FScopedTransaction Transaction(LOCTEXT("AlignUIElements_Transaction", "LGUI Align UI Elements"));
+	for (auto& Rect : Rects)
+	{
+		double DeltaY = 0, DeltaZ = 0;
+		switch (InType)
+		{
+		case EAlignType::Left:    DeltaY = MinY - Rect.MinY; break;
+		case EAlignType::HCenter: DeltaY = (MinY + MaxY) * 0.5 - Rect.CenterY(); break;
+		case EAlignType::Right:   DeltaY = MaxY - Rect.MaxY; break;
+		case EAlignType::Bottom:  DeltaZ = MinZ - Rect.MinZ; break;
+		case EAlignType::VMiddle: DeltaZ = (MinZ + MaxZ) * 0.5 - Rect.CenterZ(); break;
+		case EAlignType::Top:     DeltaZ = MaxZ - Rect.MaxZ; break;
+		}
+		ApplyWorldDelta(Rect.Item, DeltaY, DeltaZ);
+	}
+}
+
+void FLGUIPrefabEditor::DistributeSelectedUIItems(bool bHorizontal)
+{
+	using namespace LGUIPrefabEditorAlignLocal;
+	auto Items = GetSelectedUIItems();
+	if (Items.Num() < 3)return;
+
+	TArray<FWorldRect> Rects;
+	for (auto& Item : Items)
+	{
+		Rects.Add(ComputeWorldRect(Item));
+	}
+	Rects.Sort([bHorizontal](const FWorldRect& A, const FWorldRect& B)
+		{
+			return bHorizontal ? A.CenterY() < B.CenterY() : A.CenterZ() < B.CenterZ();
+		});
+
+	const double First = bHorizontal ? Rects[0].CenterY() : Rects[0].CenterZ();
+	const double Last = bHorizontal ? Rects.Last().CenterY() : Rects.Last().CenterZ();
+	const double Step = (Last - First) / (Rects.Num() - 1);
+
+	FScopedTransaction Transaction(LOCTEXT("DistributeUIElements_Transaction", "LGUI Distribute UI Elements"));
+	for (int i = 1; i < Rects.Num() - 1; i++)
+	{
+		const double Target = First + Step * i;
+		if (bHorizontal)
+		{
+			ApplyWorldDelta(Rects[i].Item, Target - Rects[i].CenterY(), 0);
+		}
+		else
+		{
+			ApplyWorldDelta(Rects[i].Item, 0, Target - Rects[i].CenterZ());
+		}
+	}
+}
+
+void FLGUIPrefabEditor::WrapSelectedUIItems(TSubclassOf<AActor> WrapperClass)
+{
+	using namespace LGUIPrefabEditorAlignLocal;
+	if (WrapperClass == nullptr)return;
+	auto Items = GetSelectedUIItems();
+	if (Items.Num() == 0)return;
+
+	// only top-level selected items (children of selected parents travel with them)
+	TArray<UUIItem*> TopLevelItems;
+	for (auto& Item : Items)
+	{
+		bool bParentAlsoSelected = false;
+		for (auto Parent = Item->GetParentUIItem(); Parent != nullptr; Parent = Parent->GetParentUIItem())
+		{
+			if (Items.Contains(Parent))
+			{
+				bParentAlsoSelected = true;
+				break;
+			}
+		}
+		if (!bParentAlsoSelected)
+		{
+			TopLevelItems.Add(Item);
+		}
+	}
+	if (TopLevelItems.Num() == 0)return;
+
+	// validation
+	UUIItem* CommonParent = TopLevelItems[0]->GetParentUIItem();
+	if (CommonParent == nullptr)
+	{
+		FMessageDialog::Open(EAppMsgType::Ok, LOCTEXT("Wrap_NoParent", "Cannot wrap: selected element has no UI parent."));
+		return;
+	}
+	for (auto& Item : TopLevelItems)
+	{
+		AActor* Actor = Item->GetOwner();
+		if (Item->GetParentUIItem() != CommonParent)
+		{
+			FMessageDialog::Open(EAppMsgType::Ok, LOCTEXT("Wrap_DifferentParents", "Cannot wrap: all selected elements must share the same parent."));
+			return;
+		}
+		if (Actor == PrefabHelperObject->LoadedRootActor)
+		{
+			FMessageDialog::Open(EAppMsgType::Ok, LOCTEXT("Wrap_Root", "Cannot wrap the prefab root actor."));
+			return;
+		}
+		if (PrefabHelperObject->IsActorBelongsToSubPrefab(Actor) && !PrefabHelperObject->SubPrefabMap.Contains(Actor))
+		{
+			FMessageDialog::Open(EAppMsgType::Ok, LOCTEXT("Wrap_SubPrefabInternal", "Cannot wrap an actor inside a sub prefab. Select the sub prefab's root instead."));
+			return;
+		}
+	}
+
+	FScopedTransaction Transaction(LOCTEXT("WrapUIElements_Transaction", "LGUI Wrap UI Elements"));
+
+	// union world rect of the selection on the UI plane
+	FWorldRect First = ComputeWorldRect(TopLevelItems[0]);
+	double MinY = First.MinY, MaxY = First.MaxY, MinZ = First.MinZ, MaxZ = First.MaxZ;
+	int32 MinHierarchyIndex = TopLevelItems[0]->GetHierarchyIndex();
+	for (auto& Item : TopLevelItems)
+	{
+		FWorldRect Rect = ComputeWorldRect(Item);
+		MinY = FMath::Min(MinY, Rect.MinY); MaxY = FMath::Max(MaxY, Rect.MaxY);
+		MinZ = FMath::Min(MinZ, Rect.MinZ); MaxZ = FMath::Max(MaxZ, Rect.MaxZ);
+		MinHierarchyIndex = FMath::Min(MinHierarchyIndex, Item->GetHierarchyIndex());
+	}
+
+	// spawn the wrapper and place it so it exactly covers the selection
+	AActor* WrapperActor = GetWorld()->SpawnActor<AActor>(WrapperClass);
+	auto WrapperUIItem = WrapperActor != nullptr ? Cast<UUIItem>(WrapperActor->GetRootComponent()) : nullptr;
+	if (WrapperUIItem == nullptr)
+	{
+		if (WrapperActor != nullptr)
+		{
+			WrapperActor->Destroy();
+		}
+		FMessageDialog::Open(EAppMsgType::Ok, LOCTEXT("Wrap_NotUIActor", "Wrapper class must be a UI actor (root component is UIItem)."));
+		Transaction.Cancel();
+		return;
+	}
+	FString WrapperLabel = WrapperClass->GetName();
+	WrapperLabel.RemoveFromEnd(TEXT("Actor"));
+	WrapperActor->SetActorLabel(WrapperLabel);
+
+	CommonParent->GetOwner()->Modify();
+	CommonParent->Modify();
+	WrapperUIItem->AttachToComponent(CommonParent, FAttachmentTransformRules::KeepRelativeTransform);
+	// center/size in the parent's local space (UI plane: local Y = horizontal, Z = vertical).
+	// Parent scale folds into the inverse transform; UI hierarchies are normally unrotated.
+	const FVector WorldCenter(First.Item->GetComponentLocation().X, (MinY + MaxY) * 0.5, (MinZ + MaxZ) * 0.5);
+	const FVector LocalCenter = CommonParent->GetComponentTransform().InverseTransformPosition(WorldCenter);
+	const FVector ParentScale = CommonParent->GetComponentScale();
+	WrapperUIItem->SetAnchoredPosition(FVector2D(LocalCenter.Y, LocalCenter.Z));
+	WrapperUIItem->SetWidth(ParentScale.Y != 0 ? (MaxY - MinY) / ParentScale.Y : (MaxY - MinY));
+	WrapperUIItem->SetHeight(ParentScale.Z != 0 ? (MaxZ - MinZ) / ParentScale.Z : (MaxZ - MinZ));
+	WrapperUIItem->SetHierarchyIndex(MinHierarchyIndex);
+
+	// move the selection into the wrapper, keeping world transforms
+	for (auto& Item : TopLevelItems)
+	{
+		Item->GetOwner()->Modify();
+		Item->Modify();
+		Item->AttachToComponent(WrapperUIItem, FAttachmentTransformRules::KeepWorldTransform);
+	}
+
+	PrefabHelperObject->SetAnythingDirty();
+	GEditor->SelectNone(true, true);
+	GEditor->SelectActor(WrapperActor, true, true, false, true);
+	if (OutlinerPtr.IsValid())
+	{
+		OutlinerPtr->FullRefresh();
+	}
+}
+
+void FLGUIPrefabEditor::ValidateEventBindings()
+{
+	// FLGUIEventDelegateData's fields are private; read them via UPROPERTY reflection.
+	// (Its editor-only CheckFunctionParameter() dereferences the Transient TargetObject
+	// without a null check, so it is unsafe to call from a cold scan like this one.)
+	auto DataStruct = FLGUIEventDelegateData::StaticStruct();
+	auto HelperActorProp = CastField<FObjectProperty>(DataStruct->FindPropertyByName(TEXT("HelperActor")));
+	auto HelperClassProp = CastField<FObjectProperty>(DataStruct->FindPropertyByName(TEXT("HelperClass")));
+	auto HelperComponentNameProp = CastField<FNameProperty>(DataStruct->FindPropertyByName(TEXT("HelperComponentName")));
+	auto FunctionNameProp = CastField<FNameProperty>(DataStruct->FindPropertyByName(TEXT("functionName")));
+	if (!HelperActorProp || !HelperClassProp || !HelperComponentNameProp || !FunctionNameProp)return;
+
+	TArray<FString> BrokenBindings;
+	auto CheckDelegateData = [&](const void* DataPtr, AActor* OwnerActor, UObject* OwnerObject, const FString& EventPropertyName)
+	{
+		AActor* HelperActor = Cast<AActor>(HelperActorProp->GetObjectPropertyValue_InContainer(DataPtr));
+		const FName FunctionName = FunctionNameProp->GetPropertyValue_InContainer(DataPtr);
+		if (HelperActor == nullptr && FunctionName.IsNone())
+		{
+			return;//empty (not yet configured) entry -- not worth warning about
+		}
+		FString Reason;
+		if (HelperActor == nullptr)
+		{
+			Reason = TEXT("target actor is missing");
+		}
+		else
+		{
+			// resolve the target the same way the runtime does: actor itself, or component by class (+name when ambiguous)
+			UObject* Target = HelperActor;
+			UClass* HelperClass = Cast<UClass>(HelperClassProp->GetObjectPropertyValue_InContainer(DataPtr));
+			if (HelperClass != nullptr && HelperClass != AActor::StaticClass() && HelperClass->IsChildOf(UActorComponent::StaticClass()))
+			{
+				const FName HelperComponentName = HelperComponentNameProp->GetPropertyValue_InContainer(DataPtr);
+				TArray<UActorComponent*> Components;
+				HelperActor->GetComponents(HelperClass, Components);
+				if (Components.Num() == 1)
+				{
+					Target = Components[0];
+				}
+				else if (Components.Num() > 1)
+				{
+					Target = nullptr;
+					for (auto& Comp : Components)
+					{
+						if (Comp->GetFName() == HelperComponentName)
+						{
+							Target = Comp;
+							break;
+						}
+					}
+					if (Target == nullptr)
+					{
+						Reason = FString::Printf(TEXT("component \"%s\" not found (renamed?)"), *HelperComponentName.ToString());
+					}
+				}
+				else
+				{
+					Target = nullptr;
+					Reason = FString::Printf(TEXT("no %s component on target actor"), *HelperClass->GetName());
+				}
+			}
+			if (Target != nullptr)
+			{
+				if (FunctionName.IsNone() || Target->FindFunction(FunctionName) == nullptr)
+				{
+					Reason = FString::Printf(TEXT("function \"%s\" not found"), *FunctionName.ToString());
+				}
+			}
+		}
+		if (!Reason.IsEmpty())
+		{
+			BrokenBindings.Add(FString::Printf(TEXT("%s > %s > %s: %s")
+				, *OwnerActor->GetActorLabel(), *OwnerObject->GetName(), *EventPropertyName, *Reason));
+		}
+	};
+
+	static const FName EventListName(TEXT("eventList"));
+	auto EventListProp = CastField<FArrayProperty>(FLGUIEventDelegate::StaticStruct()->FindPropertyByName(EventListName));
+	if (!EventListProp)return;
+
+	for (AActor* Actor : GetAllActors())
+	{
+		TArray<UObject*, TInlineAllocator<16>> ObjectsToScan;
+		ObjectsToScan.Add(Actor);
+		for (UActorComponent* Comp : Actor->GetComponents())
+		{
+			if (Comp)ObjectsToScan.Add(Comp);
+		}
+		for (UObject* Object : ObjectsToScan)
+		{
+			for (TFieldIterator<FStructProperty> PropIt(Object->GetClass()); PropIt; ++PropIt)
+			{
+				if (PropIt->Struct != FLGUIEventDelegate::StaticStruct())continue;
+				const void* DelegatePtr = PropIt->ContainerPtrToValuePtr<void>(Object);
+				FScriptArrayHelper ArrayHelper(EventListProp, EventListProp->ContainerPtrToValuePtr<void>(DelegatePtr));
+				for (int i = 0; i < ArrayHelper.Num(); i++)
+				{
+					CheckDelegateData(ArrayHelper.GetRawPtr(i), Actor, Object, PropIt->GetName());
+				}
+			}
+		}
+	}
+
+	if (BrokenBindings.Num() > 0)
+	{
+		FString Combined = FString::Join(BrokenBindings, TEXT("\n"));
+		FNotificationInfo Info(FText::Format(
+			LOCTEXT("BrokenEventBindings", "{0} broken event binding(s) in this prefab:\n{1}")
+			, BrokenBindings.Num(), FText::FromString(Combined)));
+		Info.ExpireDuration = 10.0f;
+		Info.bUseLargeFont = false;
+		FSlateNotificationManager::Get().AddNotification(Info);
+		UE_LOG(LGUIEditor, Warning, TEXT("[LGUI Prefab] Broken event bindings in %s:\n%s"), *PrefabBeingEdited->GetPathName(), *Combined);
+	}
+}
+
+void FLGUIPrefabEditor::DeleteSelectedActors_KeepChildren()
+{
+	TArray<TWeakObjectPtr<AActor>> SelectedActors;
+	for (FSelectionIterator It(GEditor->GetSelectedActorIterator()); It; ++It)
+	{
+		if (AActor* Actor = Cast<AActor>(*It))
+		{
+			if (Actor->GetWorld() == this->GetWorld())
+			{
+				SelectedActors.Add(Actor);
+			}
+		}
+	}
+	if (SelectedActors.Num() > 0)
+	{
+		DeleteActors(SelectedActors, true);
+	}
 }
 
 void FLGUIPrefabEditor::ApplyPrefab()
@@ -495,11 +1174,15 @@ void FLGUIPrefabEditor::OnApply()
 {
 	if (CheckBeforeSaveAsset())
 	{
+		// non-blocking scan for event bindings whose target no longer resolves
+		ValidateEventBindings();
+
 		//save view location and rotation
 		auto ViewTransform = ViewportPtr->GetViewportClient()->GetViewTransform();
 		PrefabBeingEdited->PrefabDataForPrefabEditor.ViewLocation = ViewTransform.GetLocation();
 		PrefabBeingEdited->PrefabDataForPrefabEditor.ViewRotation = ViewTransform.GetRotation();
 		PrefabBeingEdited->PrefabDataForPrefabEditor.ViewOrbitLocation = ViewTransform.GetLookAt();
+		PrefabBeingEdited->PrefabDataForPrefabEditor.ViewportType = (uint8)ViewportPtr->GetViewportClient()->GetViewportType();
 		if (auto RootAgentActor = GetPreviewScene().GetRootAgentActor())
 		{
 			if (!ULGUIPrefabManagerObject::OnPrefabEditor_SavePrefab.ExecuteIfBound(RootAgentActor, PrefabBeingEdited))
@@ -531,6 +1214,14 @@ void FLGUIPrefabEditor::OnApply()
 		PrefabHelperObject->SavePrefab();
 		LGUIEditorTools::RefreshLevelLoadedPrefab(PrefabHelperObject->PrefabAsset);
 		LGUIEditorTools::RefreshOnSubPrefabChange(PrefabHelperObject->PrefabAsset);
+
+		// optional diffable text snapshot alongside the (binary, un-diffable) asset
+#if WITH_EDITORONLY_DATA
+		if (GetDefault<ULGUIPrefabSettings>()->bExportTextSnapshotOnApply)
+		{
+			ExportTextSnapshot();
+		}
+#endif
 	}
 }
 
@@ -607,38 +1298,109 @@ void FLGUIPrefabEditor::BindCommands()
 
 	ToolkitCommands->MapAction(
 		PrefabEditorCommands.CopyActor,
-		FExecuteAction::CreateStatic(&LGUIEditorTools::CopySelectedActors_Impl),
-		FCanExecuteAction::CreateStatic(&LGUIEditorTools::CanCopyActor),
+		FExecuteAction::CreateLambda([this]() { RestrictSelectionToThisWorld(); LGUIEditorTools::CopySelectedActors_Impl(); }),
+		FCanExecuteAction::CreateSP(this, &FLGUIPrefabEditor::HasSelectionInThisWorld),
 		FGetActionCheckState(),
 		FIsActionButtonVisible::CreateStatic(&LGUIEditorTools::CanCopyActor)
 	);
 	ToolkitCommands->MapAction(
 		PrefabEditorCommands.CutActor,
-		FExecuteAction::CreateStatic(&LGUIEditorTools::CutSelectedActors_Impl),
-		FCanExecuteAction::CreateStatic(&LGUIEditorTools::CanCutActor),
+		FExecuteAction::CreateLambda([this]() { RestrictSelectionToThisWorld(); LGUIEditorTools::CutSelectedActors_Impl(); }),
+		FCanExecuteAction::CreateSP(this, &FLGUIPrefabEditor::HasSelectionInThisWorld),
 		FGetActionCheckState(),
 		FIsActionButtonVisible::CreateStatic(&LGUIEditorTools::CanCutActor)
 	);
 	ToolkitCommands->MapAction(
 		PrefabEditorCommands.PasteActor,
-		FExecuteAction::CreateStatic(&LGUIEditorTools::PasteSelectedActors_Impl),
+		FExecuteAction::CreateLambda([this]()
+			{
+				// paste target world = "world of the current selection", so restrict first; with no
+				// selection in this world, select the prefab root so paste lands HERE instead of
+				// falling back to the level
+				RestrictSelectionToThisWorld();
+				if (!HasSelectionInThisWorld() && IsValid(PrefabHelperObject->LoadedRootActor))
+				{
+					GEditor->SelectActor(PrefabHelperObject->LoadedRootActor, true, true);
+				}
+				LGUIEditorTools::PasteSelectedActors_Impl();
+			}),
 		FCanExecuteAction::CreateStatic(&LGUIEditorTools::CanPasteActor),
 		FGetActionCheckState(),
 		FIsActionButtonVisible::CreateStatic(&LGUIEditorTools::CanPasteActor)
 	);
 	ToolkitCommands->MapAction(
 		PrefabEditorCommands.DuplicateActor,
-		FExecuteAction::CreateStatic(&LGUIEditorTools::DuplicateSelectedActors_Impl),
-		FCanExecuteAction::CreateStatic(&LGUIEditorTools::CanDuplicateActor),
+		FExecuteAction::CreateLambda([this]() { RestrictSelectionToThisWorld(); LGUIEditorTools::DuplicateSelectedActors_Impl(); }),
+		FCanExecuteAction::CreateSP(this, &FLGUIPrefabEditor::HasSelectionInThisWorld),
 		FGetActionCheckState(),
 		FIsActionButtonVisible::CreateStatic(&LGUIEditorTools::CanDuplicateActor)
 	);
 	ToolkitCommands->MapAction(
 		PrefabEditorCommands.DestroyActor,
-		FExecuteAction::CreateStatic(&LGUIEditorTools::DeleteSelectedActors_Impl),
+		FExecuteAction::CreateLambda([this]() { RestrictSelectionToThisWorld(); LGUIEditorTools::DeleteSelectedActors_Impl(); }),
+		FCanExecuteAction::CreateSP(this, &FLGUIPrefabEditor::HasSelectionInThisWorld),
+		FGetActionCheckState(),
+		FIsActionButtonVisible::CreateStatic(&LGUIEditorTools::CanDeleteActor)
+	);
+	ToolkitCommands->MapAction(
+		PrefabEditorCommands.DestroyActorKeepChildren,
+		FExecuteAction::CreateSP(this, &FLGUIPrefabEditor::DeleteSelectedActors_KeepChildren),
 		FCanExecuteAction::CreateStatic(&LGUIEditorTools::CanDeleteActor),
 		FGetActionCheckState(),
 		FIsActionButtonVisible::CreateStatic(&LGUIEditorTools::CanDeleteActor)
+	);
+
+	// align / distribute (no default chords -- users can bind them in Editor Preferences > Keyboard Shortcuts)
+	auto CanAlign = FCanExecuteAction::CreateLambda([this]() { return GetSelectedUIItems().Num() >= 2; });
+	auto CanDistribute = FCanExecuteAction::CreateLambda([this]() { return GetSelectedUIItems().Num() >= 3; });
+	ToolkitCommands->MapAction(PrefabEditorCommands.AlignLeft,
+		FExecuteAction::CreateSP(this, &FLGUIPrefabEditor::AlignSelectedUIItems, EAlignType::Left), CanAlign);
+	ToolkitCommands->MapAction(PrefabEditorCommands.AlignHCenter,
+		FExecuteAction::CreateSP(this, &FLGUIPrefabEditor::AlignSelectedUIItems, EAlignType::HCenter), CanAlign);
+	ToolkitCommands->MapAction(PrefabEditorCommands.AlignRight,
+		FExecuteAction::CreateSP(this, &FLGUIPrefabEditor::AlignSelectedUIItems, EAlignType::Right), CanAlign);
+	ToolkitCommands->MapAction(PrefabEditorCommands.AlignTop,
+		FExecuteAction::CreateSP(this, &FLGUIPrefabEditor::AlignSelectedUIItems, EAlignType::Top), CanAlign);
+	ToolkitCommands->MapAction(PrefabEditorCommands.AlignVMiddle,
+		FExecuteAction::CreateSP(this, &FLGUIPrefabEditor::AlignSelectedUIItems, EAlignType::VMiddle), CanAlign);
+	ToolkitCommands->MapAction(PrefabEditorCommands.AlignBottom,
+		FExecuteAction::CreateSP(this, &FLGUIPrefabEditor::AlignSelectedUIItems, EAlignType::Bottom), CanAlign);
+	ToolkitCommands->MapAction(PrefabEditorCommands.DistributeHorizontal,
+		FExecuteAction::CreateSP(this, &FLGUIPrefabEditor::DistributeSelectedUIItems, true), CanDistribute);
+	ToolkitCommands->MapAction(PrefabEditorCommands.DistributeVertical,
+		FExecuteAction::CreateSP(this, &FLGUIPrefabEditor::DistributeSelectedUIItems, false), CanDistribute);
+
+	// Standard editor shortcuts (Ctrl+C/V/X/W) via the engine's generic commands, mapped to the
+	// same implementations as the LGUI-specific Shift+Alt chords above (both keep working).
+	// Toolkit command lists take priority inside this editor's window, so these don't clash
+	// with the level editor. Text fields still consume Ctrl+C first (focused-widget priority).
+	ToolkitCommands->MapAction(
+		FGenericCommands::Get().Copy,
+		FExecuteAction::CreateLambda([this]() { RestrictSelectionToThisWorld(); LGUIEditorTools::CopySelectedActors_Impl(); }),
+		FCanExecuteAction::CreateSP(this, &FLGUIPrefabEditor::HasSelectionInThisWorld)
+	);
+	ToolkitCommands->MapAction(
+		FGenericCommands::Get().Paste,
+		FExecuteAction::CreateLambda([this]()
+			{
+				RestrictSelectionToThisWorld();
+				if (!HasSelectionInThisWorld() && IsValid(PrefabHelperObject->LoadedRootActor))
+				{
+					GEditor->SelectActor(PrefabHelperObject->LoadedRootActor, true, true);
+				}
+				LGUIEditorTools::PasteSelectedActors_Impl();
+			}),
+		FCanExecuteAction::CreateStatic(&LGUIEditorTools::CanPasteActor)
+	);
+	ToolkitCommands->MapAction(
+		FGenericCommands::Get().Cut,
+		FExecuteAction::CreateLambda([this]() { RestrictSelectionToThisWorld(); LGUIEditorTools::CutSelectedActors_Impl(); }),
+		FCanExecuteAction::CreateSP(this, &FLGUIPrefabEditor::HasSelectionInThisWorld)
+	);
+	ToolkitCommands->MapAction(
+		FGenericCommands::Get().Duplicate,
+		FExecuteAction::CreateLambda([this]() { RestrictSelectionToThisWorld(); LGUIEditorTools::DuplicateSelectedActors_Impl(); }),
+		FCanExecuteAction::CreateSP(this, &FLGUIPrefabEditor::HasSelectionInThisWorld)
 	);
 }
 void FLGUIPrefabEditor::ExtendToolbar()
@@ -707,11 +1469,22 @@ TSharedRef<SDockTab> FLGUIPrefabEditor::SpawnTab_Outliner(const FSpawnTabArgs& A
 
 TSharedRef<SDockTab> FLGUIPrefabEditor::SpawnTab_PrefabRawDataViewer(const FSpawnTabArgs& Args)
 {
-	// Spawn the tab
+	// Spawn the tab. This is the prefab asset's own details view -- LGUI's version of
+	// UMG's "Class Settings" (palette category, hide in palette, reference lists, raw data).
 	return SNew(SDockTab)
-		.Label(LOCTEXT("OverrideParameterTab_Title", "PrefabRawData"))
+		.Label(LOCTEXT("OverrideParameterTab_Title", "Prefab Settings"))
 		[
 			PrefabRawDataViewer.ToSharedRef()
+		];
+}
+
+TSharedRef<SDockTab> FLGUIPrefabEditor::SpawnTab_PrefabPalette(const FSpawnTabArgs& Args)
+{
+	// Spawn the tab
+	return SNew(SDockTab)
+		.Label(LOCTEXT("PrefabPaletteTab_Title", "Prefab Palette"))
+		[
+			PalettePtr.ToSharedRef()
 		];
 }
 
@@ -822,12 +1595,25 @@ FReply FLGUIPrefabEditor::TryHandleAssetDragDropOperation(const FDragDropEvent& 
 	if (Operation.IsValid() && Operation->IsOfType<FAssetDragDropOp>())
 	{
 		TArray< FAssetData > DroppedAssetData = AssetUtil::ExtractAssetDataFromDrag(Operation);
-		const int32 NumAssets = DroppedAssetData.Num();
+		if (DroppedAssetData.Num() > 0)
+		{
+			// viewport drop has no row target -- parent under the currently selected actor
+			return HandleAssetsDropOnParentActor(DroppedAssetData, CurrentSelectedActor.Get());
+		}
+		return FReply::Handled();
+	}
+	return FReply::Unhandled();
+}
 
+FReply FLGUIPrefabEditor::HandleAssetsDropOnParentActor(const TArray<FAssetData>& DroppedAssetData, AActor* InParentActor)
+{
+	const int32 NumAssets = DroppedAssetData.Num();
+	{
 		if (NumAssets > 0)
 		{
 			TArray<ULGUIPrefab*> PrefabsToLoad;
 			TArray<UClass*> PotentialActorClassesToLoad;
+			TArray<UClass*> PotentialComponentClassesToLoad;
 			TArray<UStaticMesh*> PotentialStaticMeshesToLoad;
 			auto IsSupportedActorClass = [](UClass* ActorClass) {
 				if (ActorClass->HasAnyClassFlags(EClassFlags::CLASS_NotPlaceable | EClassFlags::CLASS_Abstract))
@@ -861,6 +1647,13 @@ FReply FLGUIPrefabEditor::TryHandleAssetDragDropOperation(const FDragDropEvent& 
 					if (IsSupportedActorClass(AssetAsClass))
 					{
 						PotentialActorClass = AssetAsClass;
+					}
+					else if (AssetAsClass->IsChildOf(UActorComponent::StaticClass())
+						&& !AssetAsClass->HasAnyClassFlags(EClassFlags::CLASS_Abstract))
+					{
+						// component class (e.g. dragged from the Prefab Palette's component groups):
+						// add the component to the parent actor
+						PotentialComponentClassesToLoad.Add(AssetAsClass);
 					}
 				}
 				if (auto PrefabAsset = Cast<ULGUIPrefab>(Asset))
@@ -896,15 +1689,15 @@ FReply FLGUIPrefabEditor::TryHandleAssetDragDropOperation(const FDragDropEvent& 
 				}
 			}
 
-			if (PrefabsToLoad.Num() > 0 || PotentialActorClassesToLoad.Num() > 0 || PotentialStaticMeshesToLoad.Num() > 0)
+			if (PrefabsToLoad.Num() > 0 || PotentialActorClassesToLoad.Num() > 0 || PotentialStaticMeshesToLoad.Num() > 0 || PotentialComponentClassesToLoad.Num() > 0)
 			{
-				if (CurrentSelectedActor == nullptr)
+				if (InParentActor == nullptr)
 				{
 					auto MsgText = LOCTEXT("Error_NeedParentNode", "Please select a actor as parent actor");
 					FMessageDialog::Open(EAppMsgType::Ok, MsgText);
 					return FReply::Unhandled();
 				}
-				if (CurrentSelectedActor == GetPreviewScene().GetRootAgentActor())
+				if (InParentActor == GetPreviewScene().GetRootAgentActor())
 				{
 					auto MsgText = FText::Format(LOCTEXT("Error_RootCannotBeParentNode", "{0} cannot be parent actor of child prefab, please choose another actor."), FText::FromString(FLGUIPrefabEditorScene::RootAgentActorName));
 					FMessageDialog::Open(EAppMsgType::Ok, MsgText);
@@ -926,7 +1719,7 @@ FReply FLGUIPrefabEditor::TryHandleAssetDragDropOperation(const FDragDropEvent& 
 					TMap<FGuid, TObjectPtr<UObject>> SubPrefabMapGuidToObject;
 					TMap<TObjectPtr<AActor>, FLGUISubPrefabData> SubSubPrefabMap;
 					auto LoadedSubPrefabRootActor = PrefabAsset->LoadPrefabWithExistingObjects(GetPreviewScene().GetWorld()
-						, CurrentSelectedActor->GetRootComponent()
+						, InParentActor->GetRootComponent()
 						, SubPrefabMapGuidToObject, SubSubPrefabMap
 					);
 
@@ -955,7 +1748,7 @@ FReply FLGUIPrefabEditor::TryHandleAssetDragDropOperation(const FDragDropEvent& 
 					{
 						if (auto RootComp = Actor->GetRootComponent())
 						{
-							RootComp->AttachToComponent(CurrentSelectedActor->GetRootComponent(), FAttachmentTransformRules::KeepWorldTransform);
+							RootComp->AttachToComponent(InParentActor->GetRootComponent(), FAttachmentTransformRules::KeepWorldTransform);
 							CreatedActorArray.Add(Actor);
 						}
 						else
@@ -972,9 +1765,23 @@ FReply FLGUIPrefabEditor::TryHandleAssetDragDropOperation(const FDragDropEvent& 
 					auto MeshActor = this->GetWorld()->SpawnActor<AStaticMeshActor>();
 					MeshActor->GetStaticMeshComponent()->SetMobility(EComponentMobility::Movable);
 					MeshActor->GetStaticMeshComponent()->SetStaticMesh(Mesh);
-					MeshActor->GetStaticMeshComponent()->AttachToComponent(CurrentSelectedActor->GetRootComponent(), FAttachmentTransformRules::KeepWorldTransform);
+					MeshActor->GetStaticMeshComponent()->AttachToComponent(InParentActor->GetRootComponent(), FAttachmentTransformRules::KeepWorldTransform);
 					MeshActor->SetActorLabel(Mesh->GetName());
 					CreatedActorArray.Add(MeshActor);
+				}
+			}
+			UActorComponent* LastCreatedComponent = nullptr;
+			if (PotentialComponentClassesToLoad.Num() > 0)
+			{
+				InParentActor->Modify();
+				for (auto& ComponentClass : PotentialComponentClassesToLoad)
+				{
+					// same recipe as LGUIEditorTools::AttachComponentToSelectedActor
+					auto Component = NewObject<UActorComponent>(InParentActor, ComponentClass
+						, *FComponentEditorUtils::GenerateValidVariableName(ComponentClass, InParentActor), RF_Transactional);
+					InParentActor->AddInstanceComponent(Component);
+					Component->RegisterComponent();
+					LastCreatedComponent = Component;
 				}
 			}
 			if (CreatedActorArray.Num() > 0)
@@ -985,14 +1792,22 @@ FReply FLGUIPrefabEditor::TryHandleAssetDragDropOperation(const FDragDropEvent& 
 					GEditor->SelectActor(Actor, true, true, false, true);
 				}
 			}
+			else if (LastCreatedComponent != nullptr)
+			{
+				// select the owner (and the new component) so the details panel shows the result
+				GEditor->SelectNone(true, true);
+				GEditor->SelectActor(InParentActor, true, true, false, true);
+				GEditor->SelectComponent(LastCreatedComponent, true, true, false);
+			}
 			GEditor->EndTransaction();
 		}
 
 		return FReply::Handled();
 	}
-	return FReply::Unhandled();
 }
 
+#if LGUI_CAN_DISABLE_OPTIMIZATION
 UE_ENABLE_OPTIMIZATION
+#endif
 
 #undef LOCTEXT_NAMESPACE

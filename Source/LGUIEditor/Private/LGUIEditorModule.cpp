@@ -80,6 +80,8 @@
 #include "DetailCustomization/UIPanelLayoutFlexibleGridSlotCustomization.h"
 
 #include "PrefabEditor/LGUIPrefabOverrideDataViewer.h"
+#include "PrefabEditor/LGUIPrefabEditor.h"
+#include "PrefabSystem/LGUIPrefabHelperObject.h"
 #include "Engine/Selection.h"
 
 #include "PrefabAnimation/LGUIPrefabSequenceComponentCustomization.h"
@@ -251,6 +253,75 @@ void FLGUIEditorModule::StartupModule()
 	//register custom editor
 	{
 		FPropertyEditorModule& PropertyModule = FModuleManager::LoadModuleChecked<FPropertyEditorModule>("PropertyEditor");
+
+		// Inline prefab-override indicator: property rows of sub-prefab members get a dot button
+		// (visible only when that member property is overridden); clicking reverts to the prefab
+		// value -- the UE-native archetype workflow, instead of only the separate override popup.
+		PrefabOverrideRowExtensionHandle = PropertyModule.GetGlobalRowExtensionDelegate().AddLambda(
+			[](const FOnGenerateGlobalRowExtensionArgs& InArgs, TArray<FPropertyRowExtensionButton>& OutExtensions)
+			{
+				if (!InArgs.PropertyHandle.IsValid())return;
+				TArray<UObject*> OuterObjects;
+				InArgs.PropertyHandle->GetOuterObjects(OuterObjects);
+				if (OuterObjects.Num() != 1 || OuterObjects[0] == nullptr)return;
+				UObject* Object = OuterObjects[0];
+
+				AActor* Actor = Cast<AActor>(Object);
+				if (Actor == nullptr)
+				{
+					Actor = Object->GetTypedOuter<AActor>();
+				}
+				if (Actor == nullptr)return;
+
+				// only for actors inside a prefab editor that belong to a sub prefab
+				auto HelperObject = FLGUIPrefabEditor::GetEditorPrefabHelperObjectForActor(Actor);
+				if (HelperObject == nullptr || !HelperObject->IsActorBelongsToSubPrefab(Actor))return;
+
+				// override bookkeeping is per MEMBER property -- walk nested handles up to the top-most one
+				TSharedPtr<IPropertyHandle> MemberHandle = InArgs.PropertyHandle;
+				while (MemberHandle->GetParentHandle().IsValid() && MemberHandle->GetParentHandle()->GetProperty() != nullptr)
+				{
+					MemberHandle = MemberHandle->GetParentHandle();
+				}
+				if (MemberHandle->GetProperty() == nullptr)return;
+				const FName MemberPropertyName = MemberHandle->GetProperty()->GetFName();
+
+				TWeakObjectPtr<ULGUIPrefabHelperObject> WeakHelper = HelperObject;
+				TWeakObjectPtr<UObject> WeakObject = Object;
+				TWeakObjectPtr<AActor> WeakActor = Actor;
+				auto IsOverridden = [WeakHelper, WeakObject, WeakActor, MemberPropertyName]()
+				{
+					if (!WeakHelper.IsValid() || !WeakObject.IsValid() || !WeakActor.IsValid())return false;
+					// find the sub prefab root this actor belongs to, then look up the override entry
+					AActor* RootActor = WeakActor.Get();
+					while (RootActor != nullptr && !WeakHelper->SubPrefabMap.Contains(RootActor))
+					{
+						RootActor = RootActor->GetAttachParentActor();
+					}
+					if (RootActor == nullptr)return false;
+					const FLGUISubPrefabData& SubPrefabData = WeakHelper->SubPrefabMap[RootActor];
+					const FLGUIPrefabOverrideParameterData* Found = SubPrefabData.ObjectOverrideParameterArray.FindByPredicate(
+						[&](const FLGUIPrefabOverrideParameterData& Item) { return Item.Object == WeakObject.Get(); });
+					return Found != nullptr && Found->MemberPropertyNames.Contains(MemberPropertyName);
+				};
+
+				FPropertyRowExtensionButton& Button = OutExtensions.AddDefaulted_GetRef();
+				Button.Icon = FSlateIcon(FAppStyle::GetAppStyleSetName(), "Icons.FilledCircle");
+				Button.Label = LOCTEXT("PrefabOverrideRowLabel", "Prefab Override");
+				Button.ToolTip = LOCTEXT("PrefabOverrideRowTooltip", "This property overrides the sub prefab's value.\nClick to revert to the prefab value. (Apply is available in the Prefab Override Properties popup.)");
+				Button.UIAction = FUIAction(
+					FExecuteAction::CreateLambda([WeakHelper, WeakObject, MemberPropertyName]()
+						{
+							if (WeakHelper.IsValid() && WeakObject.IsValid())
+							{
+								WeakHelper->RevertPrefabOverride(WeakObject.Get(), MemberPropertyName);
+							}
+						}),
+					FCanExecuteAction(),
+					FGetActionCheckState(),
+					FIsActionButtonVisible::CreateLambda(IsOverridden));
+			});
+
 		PropertyModule.RegisterCustomClassLayout(UUIItem::StaticClass()->GetFName(), FOnGetDetailCustomizationInstance::CreateStatic(&FUIItemCustomization::MakeInstance));
 		PropertyModule.RegisterCustomClassLayout(UUIBaseRenderable::StaticClass()->GetFName(), FOnGetDetailCustomizationInstance::CreateStatic(&FUIBaseRenderableCustomization::MakeInstance));
 		PropertyModule.RegisterCustomClassLayout(UUIBatchMeshRenderable::StaticClass()->GetFName(), FOnGetDetailCustomizationInstance::CreateStatic(&FUIBatchMeshRenderableCustomization::MakeInstance));
@@ -380,21 +451,10 @@ void FLGUIEditorModule::StartupModule()
 	}
 	//register setting
 	{
+		// ULGUISettings / ULGUIEditorSettings / ULGUIPrefabSettings are UDeveloperSettings now and
+		// auto-register under Project Settings > Plugins (editor settings live per-user).
 		if (ISettingsModule* SettingsModule = FModuleManager::GetModulePtr<ISettingsModule>("Settings"))
 		{
-			SettingsModule->RegisterSettings("Project", "Plugins", "LGUI",
-				LOCTEXT("LGUISettingsName", "LGUI"),
-				LOCTEXT("LGUISettingsDescription", "LGUI Settings"),
-				GetMutableDefault<ULGUISettings>());
-			SettingsModule->RegisterSettings("Project", "Plugins", "LGUI Editor",
-				LOCTEXT("LGUIEditorSettingsName", "LGUI Editor"),
-				LOCTEXT("LGUIEditorSettingsDescription", "LGUI Editor Settings"),
-				GetMutableDefault<ULGUIEditorSettings>());
-			SettingsModule->RegisterSettings("Project", "Plugins", "LGUIPrefab",
-				LOCTEXT("LGUIPrefabSettingsName", "LGUIPrefab"),
-				LOCTEXT("LGUIPrefabSettingsDescription", "LGUIPrefab Settings"),
-				GetMutableDefault<ULGUIPrefabSettings>());
-
 			LGUIPrefabSequencerSettings = USequencerSettingsContainer::GetOrCreate<ULGUIPrefabSequencerSettings>(TEXT("EmbeddedLGUIPrefabSequenceEditor"));
 			SettingsModule->RegisterSettings("Editor", "ContentEditors", "EmbeddedLGUIPrefabSequenceEditor",
 				LOCTEXT("LGUIPrefabSequencerSettingsName", "LGUI Prefab Sequence Editor"),
@@ -477,6 +537,7 @@ void FLGUIEditorModule::ShutdownModule()
 	if (UObjectInitialized() && FModuleManager::Get().IsModuleLoaded("PropertyEditor"))
 	{
 		FPropertyEditorModule& PropertyModule = FModuleManager::LoadModuleChecked<FPropertyEditorModule>("PropertyEditor");
+		PropertyModule.GetGlobalRowExtensionDelegate().Remove(PrefabOverrideRowExtensionHandle);
 		PropertyModule.UnregisterCustomClassLayout(UUIItem::StaticClass()->GetFName());
 		PropertyModule.UnregisterCustomClassLayout(UUIBaseRenderable::StaticClass()->GetFName());
 		PropertyModule.UnregisterCustomClassLayout(UUIBatchMeshRenderable::StaticClass()->GetFName());
@@ -576,12 +637,10 @@ void FLGUIEditorModule::ShutdownModule()
 
 	//unregister setting
 	{
+		// the three LGUI settings classes are UDeveloperSettings now (auto register/unregister)
 		if (ISettingsModule* SettingsModule = FModuleManager::GetModulePtr<ISettingsModule>("Settings"))
 		{
-			SettingsModule->UnregisterSettings("Project", "Plugins", "LGUI");
-			SettingsModule->UnregisterSettings("Project", "Plugins", "LGUI Editor");
-			SettingsModule->UnregisterSettings("Project", "Plugins", "LGUI Prefab");
-			SettingsModule->UnregisterSettings("Project", "Plugins", "LGUIPrefabSequencerSettings");
+			SettingsModule->UnregisterSettings("Editor", "ContentEditors", "EmbeddedLGUIPrefabSequenceEditor");
 		}
 	}
 

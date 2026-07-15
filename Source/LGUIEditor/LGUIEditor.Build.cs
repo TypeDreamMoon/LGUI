@@ -40,7 +40,7 @@ public class LGUIEditor : ModuleRules
                 "ApplicationCore",//ClipboardCopy
                 "KismetCompiler",
                 "AppFramework",
-                //"AssetRegistry",
+                "AssetRegistry",//PrefabPalette, enumerate prefab assets
                 //"InputCore",
 				// ... add other public dependencies that you statically link with here ...
                 

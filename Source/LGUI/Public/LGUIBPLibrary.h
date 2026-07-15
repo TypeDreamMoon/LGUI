@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "Kismet/BlueprintFunctionLibrary.h"
+#include "Engine/LatentActionManager.h"
 #include "LGUIComponentReference.h"
 #include "Event/LGUIEventDelegate.h"
 #include "Event/LGUIEventDelegate_PresetParameter.h"
@@ -51,6 +52,18 @@ public:
 	 */
 	UFUNCTION(BlueprintCallable, meta = (AdvancedDisplay = "InCallbackBeforeAwake,SetRelativeTransformToIdentity", UnsafeDuringActorConstruction = "true", WorldContext = "WorldContextObject", AutoCreateRefTerm="InCallbackBeforeAwake"), Category = LGUI)
 		static AActor* LoadPrefab(UObject* WorldContextObject, ULGUIPrefab* InPrefab, USceneComponent* InParent, const FLGUIPrefab_LoadPrefabCallback& InCallbackBeforeAwake, bool SetRelativeTransformToIdentity = false);
+	/**
+	 * Async version of LoadPrefab: streams the prefab asset (and everything referenced by it,
+	 * via its hard reference lists) without blocking the game thread, then constructs the actor
+	 * tree on completion. Actor construction itself is synchronous, but the asset I/O -- usually
+	 * the hitch LoadPrefab causes on first use -- happens asynchronously.
+	 * @param InPrefab Soft reference to the prefab asset; does not need to be loaded yet.
+	 * @param InParent Parent scene component the created root actor will be attached to. Can be null.
+	 * @param OnLoaded Called with the loaded root actor when done (nullptr if the asset failed to load).
+	 * @param SetRelativeTransformToIdentity Set created root actor's transform to zero after load.
+	 */
+	UFUNCTION(BlueprintCallable, meta = (AdvancedDisplay = "SetRelativeTransformToIdentity", UnsafeDuringActorConstruction = "true", WorldContext = "WorldContextObject", Latent, LatentInfo = "LatentInfo", DisplayName = "Load Prefab Async"), Category = LGUI)
+		static void LoadPrefabAsync(UObject* WorldContextObject, TSoftObjectPtr<ULGUIPrefab> InPrefab, USceneComponent* InParent, FLGUIPrefab_LoadPrefabCallback OnLoaded, FLatentActionInfo LatentInfo, bool SetRelativeTransformToIdentity = false);
 	/**
 	 * LoadPrefab to create actor.
 	 * Awake function in LGUILifeCycleBehaviour and LGUIPrefabInterface will be called right after LoadPrefab is done.

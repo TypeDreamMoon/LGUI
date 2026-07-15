@@ -9,6 +9,9 @@
 #include "Kismet2/KismetEditorUtilities.h"
 #include "ClassViewerModule.h"
 #include "ClassViewerFilter.h"
+#include "Core/Actor/UIContainerActor.h"
+#include "Core/Actor/UISpriteActor.h"
+#include "GameFramework/Actor.h"
 
 #define LOCTEXT_NAMESPACE "LGUIPrefabFactory"
 
@@ -75,6 +78,13 @@ bool ULGUIPrefabFactory::ConfigureProperties()
 	// Fill in options
 	FClassViewerInitializationOptions Options;
 	Options.Mode = EClassViewerMode::ClassPicker;
+
+	// COMMON section at the top of the picker (like UMG's "User Widget" shortcut):
+	// UIContainer is the standard root for UI prefabs, UISprite for panels with a
+	// background, plain Actor for non-UI prefabs.
+	Options.ExtraPickerCommonClasses.Add(AUIContainerActor::StaticClass());
+	Options.ExtraPickerCommonClasses.Add(AUISpriteActor::StaticClass());
+	Options.ExtraPickerCommonClasses.Add(AActor::StaticClass());
 
 	TSharedPtr<FAssetClassParentFilter> Filter = MakeShareable(new FAssetClassParentFilter);
 	Options.ClassFilters.Add(Filter.ToSharedRef());

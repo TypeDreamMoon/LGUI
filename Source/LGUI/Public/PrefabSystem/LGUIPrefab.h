@@ -147,6 +147,9 @@ public:
 		uint8 CanvasRenderMode = 0;//default LGUICanvas's render mode is ELGUIRenderMode::ScreenSpaceOverlay
 	UPROPERTY()
 		TEnumAsByte<EViewModeIndex> ViewMode = EViewModeIndex::VMI_Lit;//editor viewport's viewmode
+	/** ELevelViewportType of the prefab editor viewport. Default 2 = LVT_OrthoYZ, the 2D view facing the UI canvas. */
+	UPROPERTY()
+		uint8 ViewportType = 2;
 	UPROPERTY()
 		TSet<FGuid> UnexpendActorSet;
 };
@@ -199,6 +202,20 @@ public:
 	/** The time point when create/save this prefab. Use UtcNow from prefab version 6. */
 	UPROPERTY(VisibleAnywhere, Category = "LGUI")
 		FDateTime CreateTime;
+	/**
+	 * Grouping category shown in the Prefab Editor's "Prefab Palette" tab. Prefabs with the same
+	 * category are listed under one header; empty means "Uncategorized".
+	 * AssetRegistrySearchable so the palette can read it from the asset registry without loading the asset.
+	 */
+	UPROPERTY(EditAnywhere, AssetRegistrySearchable, Category = "LGUI")
+		FString PaletteCategory;
+	/** Hide this prefab from the Prefab Palette (it can still be used normally). Toggle the palette's "show hidden" filter to see and unhide it. */
+	UPROPERTY(EditAnywhere, AssetRegistrySearchable, Category = "LGUI")
+		bool bHideInPalette = false;
+#endif
+#if WITH_EDITOR
+	/** Asset validation (save-time feedback + DataValidation commandlet in CI). */
+	virtual EDataValidationResult IsDataValid(class FDataValidationContext& Context) const override;
 #endif
 	/** Prefab system's version when creating this prefab */
 	UPROPERTY()

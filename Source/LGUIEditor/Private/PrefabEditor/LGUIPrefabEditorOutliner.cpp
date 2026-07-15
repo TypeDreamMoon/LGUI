@@ -18,8 +18,209 @@
 #include "SceneOutlinerDragDrop.h"
 #include "PrefabSystem/LGUIPrefab.h"
 #include "PrefabSystem/LGUIPrefabHelperObject.h"
+#include "ActorBrowsingMode.h"
+#include "DragAndDrop/AssetDragDropOp.h"
+#include "LGUIPrefabEditorCommand.h"
+#include "Framework/Commands/GenericCommands.h"
+#include "Framework/MultiBox/MultiBoxBuilder.h"
+#include "Editor.h"
+#include "Core/Actor/UIContainerActor.h"
+#include "Core/Actor/UISpriteActor.h"
+#include "Core/Actor/UIProceduralRectActor.h"
+#include "Core/Actor/UITextureActor.h"
 
+#define LOCTEXT_NAMESPACE "LGUIPrefabEditorOutliner"
+
+#include "LGUI.h"//LGUI_CAN_DISABLE_OPTIMIZATION
+#if LGUI_CAN_DISABLE_OPTIMIZATION
 UE_DISABLE_OPTIMIZATION
+#endif
+
+/**
+ * Actor browser mode for the Prefab Editor outliner. Identical to the stock actor browser,
+ * plus: asset drags (FAssetDragDropOp, e.g. rows from the Prefab Palette or the Content
+ * Browser) can be dropped onto an actor row to create the assets under that actor -- same
+ * as UMG's palette-to-hierarchy drop. Everything else falls through to FActorBrowsingMode.
+ */
+class FLGUIPrefabOutlinerMode : public FActorBrowsingMode
+{
+public:
+	FLGUIPrefabOutlinerMode(SSceneOutliner* InSceneOutliner, TWeakPtr<FLGUIPrefabEditor> InPrefabEditor, TWeakObjectPtr<UWorld> InSpecifiedWorldToDisplay)
+		: FActorBrowsingMode(InSceneOutliner, InSpecifiedWorldToDisplay)
+		, PrefabEditorPtr(InPrefabEditor)
+	{}
+
+	virtual bool ParseDragDrop(FSceneOutlinerDragDropPayload& OutPayload, const FDragDropOperation& Operation) const override
+	{
+		if (Operation.IsOfType<FAssetDragDropOp>())
+		{
+			// accept: the assets travel via Payload.SourceOperation, DraggedItems stays empty.
+			// Returning false here would short-circuit HandleDrop before ValidateDrop/OnDrop.
+			return true;
+		}
+		return FActorBrowsingMode::ParseDragDrop(OutPayload, Operation);
+	}
+
+	virtual FSceneOutlinerDragValidationInfo ValidateDrop(const ISceneOutlinerTreeItem& DropTarget, const FSceneOutlinerDragDropPayload& Payload) const override
+	{
+		if (Payload.SourceOperation.IsOfType<FAssetDragDropOp>())
+		{
+			if (auto ActorItem = DropTarget.CastTo<FActorTreeItem>())
+			{
+				AActor* TargetActor = ActorItem->Actor.Get();
+				if (TargetActor != nullptr && !FLGUIPrefabEditor::ActorIsRootAgent(TargetActor))
+				{
+					// distinguish "add component to X" from "add child under X" in the hover hint
+					auto& AssetOp = static_cast<const FAssetDragDropOp&>(Payload.SourceOperation);
+					bool bAllComponentClasses = AssetOp.GetAssets().Num() > 0;
+					for (const FAssetData& AssetData : AssetOp.GetAssets())
+					{
+						UClass* AsClass = AssetData.IsAssetLoaded() ? Cast<UClass>(AssetData.GetAsset()) : nullptr;
+						if (AsClass == nullptr || !AsClass->IsChildOf(UActorComponent::StaticClass()))
+						{
+							bAllComponentClasses = false;
+							break;
+						}
+					}
+					return FSceneOutlinerDragValidationInfo(ESceneOutlinerDropCompatibility::CompatibleAttach
+						, FText::Format(bAllComponentClasses
+							? LOCTEXT("DropComponentOnActor", "Add component to {0}")
+							: LOCTEXT("DropAssetOnActor", "Add under {0}")
+							, FText::FromString(TargetActor->GetActorLabel())));
+				}
+			}
+			return FSceneOutlinerDragValidationInfo(ESceneOutlinerDropCompatibility::IncompatibleGeneric
+				, LOCTEXT("DropAssetInvalidTarget", "Drop on a UI actor to add the asset under it"));
+		}
+		return FActorBrowsingMode::ValidateDrop(DropTarget, Payload);
+	}
+
+	virtual void OnDrop(ISceneOutlinerTreeItem& DropTarget, const FSceneOutlinerDragDropPayload& Payload, const FSceneOutlinerDragValidationInfo& ValidationInfo) const override
+	{
+		if (Payload.SourceOperation.IsOfType<FAssetDragDropOp>())
+		{
+			if (auto ActorItem = DropTarget.CastTo<FActorTreeItem>())
+			{
+				if (AActor* TargetActor = ActorItem->Actor.Get())
+				{
+					if (auto PrefabEditor = PrefabEditorPtr.Pin())
+					{
+						auto& AssetOp = static_cast<const FAssetDragDropOp&>(Payload.SourceOperation);
+						PrefabEditor->HandleAssetsDropOnParentActor(AssetOp.GetAssets(), TargetActor);
+					}
+				}
+			}
+			return;
+		}
+		FActorBrowsingMode::OnDrop(DropTarget, Payload, ValidationInfo);
+	}
+
+	virtual TSharedPtr<SWidget> CreateContextMenu() override
+	{
+		auto PrefabEditor = PrefabEditorPtr.Pin();
+		if (!PrefabEditor.IsValid())
+		{
+			return FActorBrowsingMode::CreateContextMenu();
+		}
+		if (GEditor->GetSelectedActorCount() == 0)
+		{
+			return nullptr;
+		}
+
+		// build from the prefab editor's toolkit command list, so entries show their key bindings
+		// and share CanExecute/Execute with the viewport shortcuts. The Edit section uses the
+		// engine generic commands (Ctrl+X/C/V/W) mapped in BindCommands.
+		const FLGUIPrefabEditorCommand& Commands = FLGUIPrefabEditorCommand::Get();
+		FMenuBuilder MenuBuilder(true, PrefabEditor->GetToolkitCommands());
+		MenuBuilder.BeginSection("LGUIPrefabOutlinerEdit", LOCTEXT("OutlinerEditSection", "Edit"));
+		{
+			MenuBuilder.AddMenuEntry(FGenericCommands::Get().Cut);
+			MenuBuilder.AddMenuEntry(FGenericCommands::Get().Copy);
+			MenuBuilder.AddMenuEntry(FGenericCommands::Get().Paste);
+			MenuBuilder.AddMenuEntry(FGenericCommands::Get().Duplicate);
+		}
+		MenuBuilder.EndSection();
+		MenuBuilder.BeginSection("LGUIPrefabOutlinerWrap", LOCTEXT("OutlinerWrapSection", "Hierarchy"));
+		{
+			// UMG-style Wrap With: new parent container sized to the selection, selection reparented into it
+			MenuBuilder.AddSubMenu(
+				LOCTEXT("WrapWithSubMenu", "Wrap With..."),
+				LOCTEXT("WrapWithSubMenuTooltip", "Create a new UI element sized to the selection and move the selected elements into it"),
+				FNewMenuDelegate::CreateLambda([WeakEditor = PrefabEditorPtr](FMenuBuilder& SubMenu)
+					{
+						UClass* WrapperClasses[] =
+						{
+							AUIContainerActor::StaticClass(),
+							AUISpriteActor::StaticClass(),
+							AUIProceduralRectActor::StaticClass(),
+							AUITextureActor::StaticClass(),
+						};
+						for (UClass* WrapperClass : WrapperClasses)
+						{
+							FString ShortName = WrapperClass->GetName();
+							ShortName.RemoveFromEnd(TEXT("Actor"));
+							SubMenu.AddMenuEntry(
+								FText::FromString(ShortName),
+								WrapperClass->GetToolTipText(),
+								FSlateIcon(),
+								FUIAction(FExecuteAction::CreateLambda([WeakEditor, WrapperClass]()
+									{
+										if (auto Editor = WeakEditor.Pin())
+										{
+											Editor->WrapSelectedUIItems(WrapperClass);
+										}
+									})));
+						}
+					}));
+		}
+		MenuBuilder.EndSection();
+		MenuBuilder.BeginSection("LGUIPrefabOutlinerAlign", LOCTEXT("OutlinerAlignSection", "Align"));
+		{
+			MenuBuilder.AddSubMenu(
+				LOCTEXT("AlignSubMenu", "Align / Distribute"),
+				LOCTEXT("AlignSubMenuTooltip", "Align or evenly distribute the selected UI elements"),
+				FNewMenuDelegate::CreateLambda([&Commands](FMenuBuilder& SubMenu)
+					{
+						SubMenu.AddMenuEntry(Commands.AlignLeft);
+						SubMenu.AddMenuEntry(Commands.AlignHCenter);
+						SubMenu.AddMenuEntry(Commands.AlignRight);
+						SubMenu.AddSeparator();
+						SubMenu.AddMenuEntry(Commands.AlignTop);
+						SubMenu.AddMenuEntry(Commands.AlignVMiddle);
+						SubMenu.AddMenuEntry(Commands.AlignBottom);
+						SubMenu.AddSeparator();
+						SubMenu.AddMenuEntry(Commands.DistributeHorizontal);
+						SubMenu.AddMenuEntry(Commands.DistributeVertical);
+					}));
+		}
+		MenuBuilder.EndSection();
+		MenuBuilder.BeginSection("LGUIPrefabOutlinerDelete", LOCTEXT("OutlinerDeleteSection", "Delete"));
+		{
+			MenuBuilder.AddMenuEntry(Commands.DestroyActor);
+			MenuBuilder.AddMenuEntry(Commands.DestroyActorKeepChildren);
+		}
+		MenuBuilder.EndSection();
+		return MenuBuilder.MakeWidget();
+	}
+
+	virtual FReply OnKeyDown(const FKeyEvent& InKeyEvent) override
+	{
+		// Shift+Delete = delete keeping children. Must be intercepted BEFORE the base class:
+		// FActorBrowsingMode treats any Delete press (regardless of modifiers) as plain delete.
+		if (InKeyEvent.GetKey() == EKeys::Delete && InKeyEvent.IsShiftDown())
+		{
+			if (auto PrefabEditor = PrefabEditorPtr.Pin())
+			{
+				PrefabEditor->DeleteSelectedActors_KeepChildren();
+				return FReply::Handled();
+			}
+		}
+		return FActorBrowsingMode::OnKeyDown(InKeyEvent);
+	}
+
+private:
+	TWeakPtr<FLGUIPrefabEditor> PrefabEditorPtr;
+};
 
 FLGUIPrefabEditorOutliner::~FLGUIPrefabEditorOutliner()
 {
@@ -52,7 +253,14 @@ void FLGUIPrefabEditorOutliner::InitOutliner(UWorld* World, TSharedPtr<FLGUIPref
 	InitOptions.OutlinerIdentifier = "LGUIPrefabEditorOutliner";
 	InitOptions.CustomDelete = FCustomSceneOutlinerDeleteDelegate::CreateRaw(this, &FLGUIPrefabEditorOutliner::OnDelete);
 
-	TSharedRef<ISceneOutliner> SceneOutlinerRef = SceneOutlinerModule.CreateActorBrowser(InitOptions, World);
+	// same as CreateActorBrowser, but with our mode subclass so asset drags (Prefab Palette /
+	// Content Browser) can be dropped onto actor rows; columns are already set up above
+	InitOptions.ModeFactory = FCreateSceneOutlinerMode::CreateLambda(
+		[WeakPrefabEditor = TWeakPtr<FLGUIPrefabEditor>(InPrefabEditorPtr), WeakWorld = TWeakObjectPtr<UWorld>(World)](SSceneOutliner* Outliner)
+		{
+			return static_cast<ISceneOutlinerMode*>(new FLGUIPrefabOutlinerMode(Outliner, WeakPrefabEditor, WeakWorld));
+		});
+	TSharedRef<ISceneOutliner> SceneOutlinerRef = SceneOutlinerModule.CreateSceneOutliner(InitOptions);
 	SceneOutlinerPtr = StaticCastSharedRef<SSceneOutliner>(SceneOutlinerRef->AsShared());
 
 	//SceneOutlinerPtr->GetOnItemSelectionChanged().AddRaw(this, &FLGUIPrefabEditorOutliner::OnSceneOutlinerSelectionChanged);
@@ -248,5 +456,9 @@ void FLGUIPrefabEditorOutliner::GetUnexpendActor(TArray<AActor*>& InOutAllActors
 	}
 }
 
+#undef LOCTEXT_NAMESPACE
+
+#if LGUI_CAN_DISABLE_OPTIMIZATION
 UE_ENABLE_OPTIMIZATION
+#endif
 

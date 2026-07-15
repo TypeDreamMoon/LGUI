@@ -4,6 +4,8 @@
 #include "LGUIPrefabEditorViewportClient.h"
 #include "LGUIPrefabEditor.h"
 #include "LGUIPrefabEditorViewportToolbar.h"
+#include "PrefabSystem/LGUIPrefab.h"
+#include "Core/ActorComponent/UIItem.h"
 
 #define LOCTEXT_NAMESPACE "LGUIPrefabEditorViewport"
 
@@ -20,7 +22,8 @@ void SLGUIPrefabEditorViewport::BindCommands()
 TSharedRef<FEditorViewportClient> SLGUIPrefabEditorViewport::MakeEditorViewportClient()
 {
 	EditorViewportClient = MakeShareable(new FLGUIPrefabEditorViewportClient(this->PrefabEditorPtr.Pin()->GetPreviewScene(), this->PrefabEditorPtr, SharedThis(this)));
-	EditorViewportClient->ViewportType = LVT_Perspective;
+	// restore the persisted viewport type; new prefabs default to the 2D canvas view (LVT_OrthoYZ)
+	EditorViewportClient->ViewportType = (ELevelViewportType)this->PrefabEditorPtr.Pin()->GetPrefabBeingEdited()->PrefabDataForPrefabEditor.ViewportType;
 	EditorViewportClient->bSetListenerPosition = false;
 	EditorViewportClient->SetRealtime(true);
 	EditorViewportClient->SetShowStats(true);
@@ -59,6 +62,43 @@ void SLGUIPrefabEditorViewport::OnFloatingButtonClicked()
 FReply SLGUIPrefabEditorViewport::OnDrop(const FGeometry& MyGeometry, const FDragDropEvent& DragDropEvent)
 {
 	return PrefabEditorPtr.Pin()->TryHandleAssetDragDropOperation(DragDropEvent);
+}
+
+void SLGUIPrefabEditorViewport::ToggleViewportType2D3D()
+{
+	if (!EditorViewportClient.IsValid())return;
+	const ELevelViewportType NewType = IsViewport2D() ? LVT_Perspective : LVT_OrthoYZ;
+	EditorViewportClient->SetViewportType(NewType);
+	if (NewType == LVT_OrthoYZ)
+	{
+		// frame the canvas when entering 2D so the user isn't lost at an arbitrary ortho zoom
+		EditorViewportClient->FocusViewportToTargets();
+	}
+	// persist immediately (also saved on Apply)
+	if (auto PrefabEditor = PrefabEditorPtr.Pin())
+	{
+		if (auto Prefab = PrefabEditor->GetPrefabBeingEdited())
+		{
+			Prefab->PrefabDataForPrefabEditor.ViewportType = (uint8)NewType;
+		}
+	}
+}
+
+bool SLGUIPrefabEditorViewport::IsViewport2D() const
+{
+	return EditorViewportClient.IsValid() && EditorViewportClient->GetViewportType() != LVT_Perspective;
+}
+
+UUIItem* SLGUIPrefabEditorViewport::GetRootAgentUIItem() const
+{
+	if (auto PrefabEditor = PrefabEditorPtr.Pin())
+	{
+		if (auto RootAgent = PrefabEditor->GetPreviewScene().GetRootAgentActor())
+		{
+			return Cast<UUIItem>(RootAgent->GetRootComponent());
+		}
+	}
+	return nullptr;
 }
 
 #undef LOCTEXT_NAMESPACE

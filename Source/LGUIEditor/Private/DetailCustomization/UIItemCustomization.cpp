@@ -29,7 +29,11 @@
 
 #define LOCTEXT_NAMESPACE "UIItemComponentDetails"
 
+#include "LGUI.h"//LGUI_CAN_DISABLE_OPTIMIZATION
+#if LGUI_CAN_DISABLE_OPTIMIZATION
 UE_DISABLE_OPTIMIZATION
+#endif
+PRAGMA_DISABLE_UNREACHABLE_CODE_WARNINGS//engine StringView.h inline expansion false-positive under O2
 
 FUIItemCustomization::FUIItemCustomization()
 {
@@ -2135,5 +2139,8 @@ bool FUIItemCustomization::GetLayoutControlVerticalSizeDelta()const
 	return GetLayoutControlAnchorValue().bCanControlVerticalSizeDelta;
 }
 
+PRAGMA_RESTORE_UNREACHABLE_CODE_WARNINGS
+#if LGUI_CAN_DISABLE_OPTIMIZATION
 UE_ENABLE_OPTIMIZATION
+#endif
 #undef LOCTEXT_NAMESPACE
