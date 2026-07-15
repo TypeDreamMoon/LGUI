@@ -5,6 +5,7 @@
 #include "LGUIPrefabEditor.h"
 #include "LGUIPrefabEditorViewportToolbar.h"
 #include "PrefabSystem/LGUIPrefab.h"
+#include "Core/ActorComponent/UIItem.h"
 
 #define LOCTEXT_NAMESPACE "LGUIPrefabEditorViewport"
 
@@ -86,6 +87,18 @@ void SLGUIPrefabEditorViewport::ToggleViewportType2D3D()
 bool SLGUIPrefabEditorViewport::IsViewport2D() const
 {
 	return EditorViewportClient.IsValid() && EditorViewportClient->GetViewportType() != LVT_Perspective;
+}
+
+UUIItem* SLGUIPrefabEditorViewport::GetRootAgentUIItem() const
+{
+	if (auto PrefabEditor = PrefabEditorPtr.Pin())
+	{
+		if (auto RootAgent = PrefabEditor->GetPreviewScene().GetRootAgentActor())
+		{
+			return Cast<UUIItem>(RootAgent->GetRootComponent());
+		}
+	}
+	return nullptr;
 }
 
 #undef LOCTEXT_NAMESPACE

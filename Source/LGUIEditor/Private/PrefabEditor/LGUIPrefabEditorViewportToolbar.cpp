@@ -3,8 +3,11 @@
 #include "LGUIPrefabEditorViewportToolbar.h"
 #include "LGUIPrefabEditorViewport.h"
 #include "Core/LGUISettings.h"
+#include "Core/ActorComponent/UIItem.h"
+#include "ScopedTransaction.h"
 #include "Styling/AppStyle.h"
 #include "Widgets/Input/SCheckBox.h"
+#include "Widgets/Input/SComboButton.h"
 #include "Widgets/Text/STextBlock.h"
 
 #define LOCTEXT_NAMESPACE "SLGUIPrefabEditorViewportToolbar"
@@ -45,6 +48,88 @@ void SLGUIPrefabEditorViewportToolbar::ExtendLeftAlignedToolbarSlots(TSharedPtr<
 				SNew(STextBlock)
 				.Text(LOCTEXT("Toggle2DLabel", "2D"))
 				.Font(FAppStyle::Get().GetFontStyle("SmallFontBold"))
+			]
+		];
+
+	// canvas resolution preview dropdown (UMG screen-size equivalent): sets the root agent's
+	// UIItem width/height, which persists as PrefabDataForPrefabEditor.CanvasSize on Apply
+	auto GetRootUIItem = [WeakToolbar = TWeakPtr<const SLGUIPrefabEditorViewportToolbar>(SharedThis(this))]() -> UUIItem*
+	{
+		if (auto Toolbar = WeakToolbar.Pin())
+		{
+			auto Viewport = StaticCastSharedRef<SLGUIPrefabEditorViewport>(Toolbar->GetInfoProvider().GetViewportWidget());
+			return Viewport->GetRootAgentUIItem();
+		}
+		return nullptr;
+	};
+	MainBoxPtr->AddSlot()
+		.AutoWidth()
+		.Padding(2.0f, 1.0f)
+		.VAlign(VAlign_Center)
+		[
+			SNew(SComboButton)
+			.ToolTipText(LOCTEXT("ResolutionTooltip", "Canvas preview resolution (sets the root canvas size, persisted with the prefab)"))
+			.OnGetMenuContent_Lambda([GetRootUIItem]()
+				{
+					struct FPreset { const TCHAR* Name; FIntPoint Size; };
+					static const FPreset Presets[] =
+					{
+						{ TEXT("1920 x 1080 (FHD)"), FIntPoint(1920, 1080) },
+						{ TEXT("2560 x 1440 (QHD)"), FIntPoint(2560, 1440) },
+						{ TEXT("3840 x 2160 (4K)"), FIntPoint(3840, 2160) },
+						{ TEXT("1280 x 720 (HD)"), FIntPoint(1280, 720) },
+						{ TEXT("1080 x 1920 (Portrait FHD)"), FIntPoint(1080, 1920) },
+						{ TEXT("750 x 1334 (Phone Portrait)"), FIntPoint(750, 1334) },
+						{ TEXT("768 x 1024 (Tablet Portrait)"), FIntPoint(768, 1024) },
+					};
+					auto SetSize = [GetRootUIItem](FIntPoint Size)
+					{
+						if (auto UIItem = GetRootUIItem())
+						{
+							FScopedTransaction Transaction(LOCTEXT("SetPreviewResolution_Transaction", "LGUI Set Canvas Preview Resolution"));
+							UIItem->Modify();
+							UIItem->SetWidth(Size.X);
+							UIItem->SetHeight(Size.Y);
+						}
+					};
+					FMenuBuilder MenuBuilder(true, nullptr);
+					MenuBuilder.BeginSection(NAME_None, LOCTEXT("ResolutionPresets", "Canvas Resolution"));
+					for (const auto& Preset : Presets)
+					{
+						MenuBuilder.AddMenuEntry(
+							FText::FromString(Preset.Name),
+							FText::GetEmpty(),
+							FSlateIcon(),
+							FUIAction(FExecuteAction::CreateLambda([SetSize, Size = Preset.Size]() { SetSize(Size); })));
+					}
+					MenuBuilder.AddSeparator();
+					MenuBuilder.AddMenuEntry(
+						LOCTEXT("SwapResolution", "Swap Width/Height"),
+						LOCTEXT("SwapResolutionTooltip", "Rotate between landscape and portrait"),
+						FSlateIcon(),
+						FUIAction(FExecuteAction::CreateLambda([GetRootUIItem, SetSize]()
+							{
+								if (auto UIItem = GetRootUIItem())
+								{
+									SetSize(FIntPoint(FMath::RoundToInt(UIItem->GetHeight()), FMath::RoundToInt(UIItem->GetWidth())));
+								}
+							})));
+					MenuBuilder.EndSection();
+					return MenuBuilder.MakeWidget();
+				})
+			.ButtonContent()
+			[
+				SNew(STextBlock)
+				.Font(FAppStyle::Get().GetFontStyle("SmallFont"))
+				.Text_Lambda([GetRootUIItem]()
+					{
+						if (auto UIItem = GetRootUIItem())
+						{
+							return FText::FromString(FString::Printf(TEXT("%d x %d")
+								, FMath::RoundToInt(UIItem->GetWidth()), FMath::RoundToInt(UIItem->GetHeight())));
+						}
+						return LOCTEXT("NoCanvas", "Canvas");
+					})
 			]
 		];
 }

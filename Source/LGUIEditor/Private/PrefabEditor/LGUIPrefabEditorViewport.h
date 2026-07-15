@@ -40,6 +40,8 @@ public:
 	/** Toggle between the 2D canvas view (LVT_OrthoYZ, facing the UI) and the perspective view. Persisted per prefab. */
 	void ToggleViewportType2D3D();
 	bool IsViewport2D() const;
+	/** Root agent's UIItem -- its width/height is the canvas preview size (persisted as CanvasSize on Apply). */
+	class UUIItem* GetRootAgentUIItem() const;
 
 private:
 	// Pointer back to owning sprite editor instance (the keeper of state)
