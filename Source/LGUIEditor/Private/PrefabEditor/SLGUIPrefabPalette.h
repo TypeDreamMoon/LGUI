@@ -21,6 +21,8 @@ struct FLGUIPrefabPaletteItem
 {
 	FAssetData Asset;
 	FString CategoryName;
+	/** True on the pinned "Favorites" header (distinguishes it from a user category literally named "Favorites"). */
+	bool bIsFavoritesGroup = false;
 	TArray<TSharedPtr<FLGUIPrefabPaletteItem>> Children;
 
 	bool IsCategory()const { return !Asset.IsValid(); }
@@ -66,6 +68,12 @@ private:
 	void SetItemCategory(FItemPtr InItem, FString NewCategory);
 	void OnNewCategoryTextCommitted(const FText& InText, ETextCommit::Type CommitType, FItemPtr InItem);
 
+	// favorites (persisted per project in the editor ini)
+	bool IsFavorite(const FAssetData& InAssetData)const;
+	void ToggleFavorite(FItemPtr InItem);
+	void LoadFavorites();
+	void SaveFavorites()const;
+
 	// asset registry change handlers (may fire off the game thread -- only set the dirty flag)
 	void OnAssetChanged(const FAssetData& InAssetData);
 	void OnAssetRenamed(const FAssetData& InAssetData, const FString& InOldObjectPath);
@@ -82,6 +90,8 @@ private:
 
 	TSharedPtr<FAssetThumbnailPool> ThumbnailPool;
 	FTextFilterExpressionEvaluator SearchFilter{ ETextFilterExpressionEvaluatorMode::BasicString };
+	/** Object paths of favorited prefab assets. */
+	TSet<FString> FavoritePaths;
 
 	std::atomic<bool> bPendingRebuild{ false };
 

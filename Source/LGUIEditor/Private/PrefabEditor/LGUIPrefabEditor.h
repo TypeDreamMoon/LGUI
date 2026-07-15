@@ -62,6 +62,11 @@ public:
 
 	/** Try to handle a drag-drop operation */
 	FReply TryHandleAssetDragDropOperation(const FDragDropEvent& DragDropEvent);
+	/**
+	 * Create actors / sub prefabs from dropped assets, attached under the given parent actor.
+	 * Shared by the viewport drop (parent = selected actor) and the outliner row drop (parent = drop target row).
+	 */
+	FReply HandleAssetsDropOnParentActor(const TArray<struct FAssetData>& DroppedAssetData, AActor* InParentActor);
 
 	FLGUIPrefabEditorScene& GetPreviewScene();
 	UWorld* GetWorld();

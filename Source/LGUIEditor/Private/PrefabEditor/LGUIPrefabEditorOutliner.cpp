@@ -18,8 +18,80 @@
 #include "SceneOutlinerDragDrop.h"
 #include "PrefabSystem/LGUIPrefab.h"
 #include "PrefabSystem/LGUIPrefabHelperObject.h"
+#include "ActorBrowsingMode.h"
+#include "DragAndDrop/AssetDragDropOp.h"
+
+#define LOCTEXT_NAMESPACE "LGUIPrefabEditorOutliner"
 
 UE_DISABLE_OPTIMIZATION
+
+/**
+ * Actor browser mode for the Prefab Editor outliner. Identical to the stock actor browser,
+ * plus: asset drags (FAssetDragDropOp, e.g. rows from the Prefab Palette or the Content
+ * Browser) can be dropped onto an actor row to create the assets under that actor -- same
+ * as UMG's palette-to-hierarchy drop. Everything else falls through to FActorBrowsingMode.
+ */
+class FLGUIPrefabOutlinerMode : public FActorBrowsingMode
+{
+public:
+	FLGUIPrefabOutlinerMode(SSceneOutliner* InSceneOutliner, TWeakPtr<FLGUIPrefabEditor> InPrefabEditor, TWeakObjectPtr<UWorld> InSpecifiedWorldToDisplay)
+		: FActorBrowsingMode(InSceneOutliner, InSpecifiedWorldToDisplay)
+		, PrefabEditorPtr(InPrefabEditor)
+	{}
+
+	virtual bool ParseDragDrop(FSceneOutlinerDragDropPayload& OutPayload, const FDragDropOperation& Operation) const override
+	{
+		if (Operation.IsOfType<FAssetDragDropOp>())
+		{
+			// accept: the assets travel via Payload.SourceOperation, DraggedItems stays empty.
+			// Returning false here would short-circuit HandleDrop before ValidateDrop/OnDrop.
+			return true;
+		}
+		return FActorBrowsingMode::ParseDragDrop(OutPayload, Operation);
+	}
+
+	virtual FSceneOutlinerDragValidationInfo ValidateDrop(const ISceneOutlinerTreeItem& DropTarget, const FSceneOutlinerDragDropPayload& Payload) const override
+	{
+		if (Payload.SourceOperation.IsOfType<FAssetDragDropOp>())
+		{
+			if (auto ActorItem = DropTarget.CastTo<FActorTreeItem>())
+			{
+				AActor* TargetActor = ActorItem->Actor.Get();
+				if (TargetActor != nullptr && !FLGUIPrefabEditor::ActorIsRootAgent(TargetActor))
+				{
+					return FSceneOutlinerDragValidationInfo(ESceneOutlinerDropCompatibility::CompatibleAttach
+						, FText::Format(LOCTEXT("DropAssetOnActor", "Add under {0}"), FText::FromString(TargetActor->GetActorLabel())));
+				}
+			}
+			return FSceneOutlinerDragValidationInfo(ESceneOutlinerDropCompatibility::IncompatibleGeneric
+				, LOCTEXT("DropAssetInvalidTarget", "Drop on a UI actor to add the asset under it"));
+		}
+		return FActorBrowsingMode::ValidateDrop(DropTarget, Payload);
+	}
+
+	virtual void OnDrop(ISceneOutlinerTreeItem& DropTarget, const FSceneOutlinerDragDropPayload& Payload, const FSceneOutlinerDragValidationInfo& ValidationInfo) const override
+	{
+		if (Payload.SourceOperation.IsOfType<FAssetDragDropOp>())
+		{
+			if (auto ActorItem = DropTarget.CastTo<FActorTreeItem>())
+			{
+				if (AActor* TargetActor = ActorItem->Actor.Get())
+				{
+					if (auto PrefabEditor = PrefabEditorPtr.Pin())
+					{
+						auto& AssetOp = static_cast<const FAssetDragDropOp&>(Payload.SourceOperation);
+						PrefabEditor->HandleAssetsDropOnParentActor(AssetOp.GetAssets(), TargetActor);
+					}
+				}
+			}
+			return;
+		}
+		FActorBrowsingMode::OnDrop(DropTarget, Payload, ValidationInfo);
+	}
+
+private:
+	TWeakPtr<FLGUIPrefabEditor> PrefabEditorPtr;
+};
 
 FLGUIPrefabEditorOutliner::~FLGUIPrefabEditorOutliner()
 {
@@ -52,7 +124,14 @@ void FLGUIPrefabEditorOutliner::InitOutliner(UWorld* World, TSharedPtr<FLGUIPref
 	InitOptions.OutlinerIdentifier = "LGUIPrefabEditorOutliner";
 	InitOptions.CustomDelete = FCustomSceneOutlinerDeleteDelegate::CreateRaw(this, &FLGUIPrefabEditorOutliner::OnDelete);
 
-	TSharedRef<ISceneOutliner> SceneOutlinerRef = SceneOutlinerModule.CreateActorBrowser(InitOptions, World);
+	// same as CreateActorBrowser, but with our mode subclass so asset drags (Prefab Palette /
+	// Content Browser) can be dropped onto actor rows; columns are already set up above
+	InitOptions.ModeFactory = FCreateSceneOutlinerMode::CreateLambda(
+		[WeakPrefabEditor = TWeakPtr<FLGUIPrefabEditor>(InPrefabEditorPtr), WeakWorld = TWeakObjectPtr<UWorld>(World)](SSceneOutliner* Outliner)
+		{
+			return static_cast<ISceneOutlinerMode*>(new FLGUIPrefabOutlinerMode(Outliner, WeakPrefabEditor, WeakWorld));
+		});
+	TSharedRef<ISceneOutliner> SceneOutlinerRef = SceneOutlinerModule.CreateSceneOutliner(InitOptions);
 	SceneOutlinerPtr = StaticCastSharedRef<SSceneOutliner>(SceneOutlinerRef->AsShared());
 
 	//SceneOutlinerPtr->GetOnItemSelectionChanged().AddRaw(this, &FLGUIPrefabEditorOutliner::OnSceneOutlinerSelectionChanged);
@@ -247,6 +326,8 @@ void FLGUIPrefabEditorOutliner::GetUnexpendActor(TArray<AActor*>& InOutAllActors
 		}
 	}
 }
+
+#undef LOCTEXT_NAMESPACE
 
 UE_ENABLE_OPTIMIZATION
 

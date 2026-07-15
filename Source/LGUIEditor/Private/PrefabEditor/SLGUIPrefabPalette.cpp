@@ -12,9 +12,11 @@
 #include "Framework/Application/SlateApplication.h"
 #include "Framework/MultiBox/MultiBoxBuilder.h"
 #include "IContentBrowserSingleton.h"
+#include "Misc/ConfigCacheIni.h"
 #include "Modules/ModuleManager.h"
 #include "ScopedTransaction.h"
 #include "Styling/AppStyle.h"
+#include "Widgets/Images/SImage.h"
 #include "Widgets/Input/SEditableTextBox.h"
 #include "Widgets/Input/SSearchBox.h"
 #include "Widgets/Layout/SBox.h"
@@ -27,6 +29,8 @@ namespace LGUIPrefabPaletteLocal
 {
 	const FName PaletteCategoryTagName(TEXT("PaletteCategory"));
 	const TCHAR* UncategorizedKey = TEXT("");//internal key for prefabs with no category
+	const TCHAR* FavoritesConfigSection = TEXT("LGUIPrefabPalette");
+	const TCHAR* FavoritesConfigKey = TEXT("Favorites");
 
 	FText GetCategoryDisplayText(const FString& InCategory)
 	{
@@ -38,6 +42,7 @@ void SLGUIPrefabPalette::Construct(const FArguments& InArgs, TSharedPtr<FLGUIPre
 {
 	PrefabEditorPtr = InPrefabEditor;
 	ThumbnailPool = MakeShared<FAssetThumbnailPool>(64);//FTickableEditorObject, ticks itself
+	LoadFavorites();
 
 	ChildSlot
 	[
@@ -132,6 +137,7 @@ void SLGUIPrefabPalette::RebuildList()
 
 	const bool bFilterActive = !SearchFilter.GetFilterText().IsEmpty();
 	TMap<FString, FItemPtr> CategoryMap;
+	FItemPtr FavoritesHeader;
 	for (auto& AssetData : PrefabAssets)
 	{
 		// the prefab being edited can never be its own child -- hide it
@@ -157,6 +163,19 @@ void SLGUIPrefabPalette::RebuildList()
 		auto Item = MakeShared<FLGUIPrefabPaletteItem>();
 		Item->Asset = AssetData;
 		Header->Children.Add(Item);
+
+		// favorited prefabs additionally appear under the pinned Favorites group (UMG behavior)
+		if (IsFavorite(AssetData))
+		{
+			if (!FavoritesHeader.IsValid())
+			{
+				FavoritesHeader = MakeShared<FLGUIPrefabPaletteItem>();
+				FavoritesHeader->bIsFavoritesGroup = true;
+			}
+			auto FavItem = MakeShared<FLGUIPrefabPaletteItem>();
+			FavItem->Asset = AssetData;
+			FavoritesHeader->Children.Add(FavItem);
+		}
 	}
 
 	CategoryMap.GenerateValueArray(RootItems);
@@ -168,6 +187,11 @@ void SLGUIPrefabPalette::RebuildList()
 		}
 		return A->CategoryName < B->CategoryName;
 		});
+	// Favorites pinned to the very top
+	if (FavoritesHeader.IsValid())
+	{
+		RootItems.Insert(FavoritesHeader, 0);
+	}
 	for (auto& Header : RootItems)
 	{
 		Header->Children.Sort([](const FItemPtr& A, const FItemPtr& B) {
@@ -190,14 +214,33 @@ TSharedRef<ITableRow> SLGUIPrefabPalette::OnGenerateRow(FItemPtr InItem, const T
 {
 	if (InItem->IsCategory())
 	{
+		const FText HeaderText = InItem->bIsFavoritesGroup
+			? LOCTEXT("FavoritesGroup", "Favorites")
+			: LGUIPrefabPaletteLocal::GetCategoryDisplayText(InItem->CategoryName);
 		return SNew(STableRow<FItemPtr>, OwnerTable)
 			.ShowSelection(false)
 			.Padding(FMargin(4, 3))
 			[
-				SNew(STextBlock)
-				.Font(FAppStyle::Get().GetFontStyle("SmallFontBold"))
-				.Text(LGUIPrefabPaletteLocal::GetCategoryDisplayText(InItem->CategoryName).ToUpper())
-				.ColorAndOpacity(FSlateColor::UseSubduedForeground())
+				SNew(SHorizontalBox)
+				+ SHorizontalBox::Slot()
+				.AutoWidth()
+				.VAlign(VAlign_Center)
+				.Padding(0, 0, 4, 0)
+				[
+					SNew(SImage)
+					.Image(FAppStyle::Get().GetBrush("Icons.Star"))
+					.DesiredSizeOverride(FVector2D(12, 12))
+					.Visibility(InItem->bIsFavoritesGroup ? EVisibility::Visible : EVisibility::Collapsed)
+				]
+				+ SHorizontalBox::Slot()
+				.FillWidth(1.0f)
+				.VAlign(VAlign_Center)
+				[
+					SNew(STextBlock)
+					.Font(FAppStyle::Get().GetFontStyle("SmallFontBold"))
+					.Text(HeaderText.ToUpper())
+					.ColorAndOpacity(FSlateColor::UseSubduedForeground())
+				]
 			];
 	}
 
@@ -227,6 +270,21 @@ TSharedRef<ITableRow> SLGUIPrefabPalette::OnGenerateRow(FItemPtr InItem, const T
 			[
 				SNew(STextBlock)
 				.Text(FText::FromName(InItem->Asset.AssetName))
+			]
+			+ SHorizontalBox::Slot()
+			.AutoWidth()
+			.VAlign(VAlign_Center)
+			.Padding(4, 0)
+			[
+				SNew(SImage)
+				.Image(FAppStyle::Get().GetBrush("Icons.Star"))
+				.DesiredSizeOverride(FVector2D(10, 10))
+				.ColorAndOpacity(FSlateColor::UseSubduedForeground())
+				.Visibility_Lambda([this, WeakItem = TWeakPtr<FLGUIPrefabPaletteItem>(InItem)]()
+					{
+						auto Pinned = WeakItem.Pin();
+						return (Pinned.IsValid() && IsFavorite(Pinned->Asset)) ? EVisibility::Visible : EVisibility::Collapsed;
+					})
 			]
 		];
 }
@@ -277,6 +335,13 @@ TSharedPtr<SWidget> SLGUIPrefabPalette::OnContextMenuOpening()
 	FMenuBuilder MenuBuilder(true, nullptr);
 	MenuBuilder.BeginSection(NAME_None, LOCTEXT("PrefabSection", "Prefab"));
 	{
+		const bool bIsFavorite = IsFavorite(Item->Asset);
+		MenuBuilder.AddMenuEntry(
+			bIsFavorite ? LOCTEXT("RemoveFromFavorites", "Remove from Favorites") : LOCTEXT("AddToFavorites", "Add to Favorites"),
+			LOCTEXT("ToggleFavoriteTooltip", "Favorited prefabs are pinned in the Favorites group at the top of the palette"),
+			FSlateIcon(FAppStyle::GetAppStyleSetName(), "Icons.Star"),
+			FUIAction(FExecuteAction::CreateSP(this, &SLGUIPrefabPalette::ToggleFavorite, Item)));
+
 		MenuBuilder.AddMenuEntry(
 			LOCTEXT("BrowseToAsset", "Browse to Asset"),
 			LOCTEXT("BrowseToAssetTooltip", "Select this prefab in the Content Browser"),
@@ -348,6 +413,41 @@ void SLGUIPrefabPalette::OnNewCategoryTextCommitted(const FText& InText, ETextCo
 		FSlateApplication::Get().DismissAllMenus();
 		SetItemCategory(InItem, InText.ToString().TrimStartAndEnd());
 	}
+}
+
+bool SLGUIPrefabPalette::IsFavorite(const FAssetData& InAssetData)const
+{
+	return FavoritePaths.Contains(InAssetData.GetSoftObjectPath().ToString());
+}
+
+void SLGUIPrefabPalette::ToggleFavorite(FItemPtr InItem)
+{
+	if (!InItem.IsValid() || InItem->IsCategory())return;
+	const FString Path = InItem->Asset.GetSoftObjectPath().ToString();
+	if (FavoritePaths.Contains(Path))
+	{
+		FavoritePaths.Remove(Path);
+	}
+	else
+	{
+		FavoritePaths.Add(Path);
+	}
+	SaveFavorites();
+	RequestRebuild();
+}
+
+void SLGUIPrefabPalette::LoadFavorites()
+{
+	FavoritePaths.Reset();
+	TArray<FString> Paths;
+	GConfig->GetArray(LGUIPrefabPaletteLocal::FavoritesConfigSection, LGUIPrefabPaletteLocal::FavoritesConfigKey, Paths, GEditorPerProjectIni);
+	FavoritePaths.Append(Paths);
+}
+
+void SLGUIPrefabPalette::SaveFavorites()const
+{
+	GConfig->SetArray(LGUIPrefabPaletteLocal::FavoritesConfigSection, LGUIPrefabPaletteLocal::FavoritesConfigKey, FavoritePaths.Array(), GEditorPerProjectIni);
+	GConfig->Flush(false, GEditorPerProjectIni);
 }
 
 void SLGUIPrefabPalette::OnAssetChanged(const FAssetData& InAssetData)

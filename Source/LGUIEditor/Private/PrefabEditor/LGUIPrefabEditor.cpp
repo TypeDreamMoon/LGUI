@@ -845,8 +845,20 @@ FReply FLGUIPrefabEditor::TryHandleAssetDragDropOperation(const FDragDropEvent& 
 	if (Operation.IsValid() && Operation->IsOfType<FAssetDragDropOp>())
 	{
 		TArray< FAssetData > DroppedAssetData = AssetUtil::ExtractAssetDataFromDrag(Operation);
-		const int32 NumAssets = DroppedAssetData.Num();
+		if (DroppedAssetData.Num() > 0)
+		{
+			// viewport drop has no row target -- parent under the currently selected actor
+			return HandleAssetsDropOnParentActor(DroppedAssetData, CurrentSelectedActor.Get());
+		}
+		return FReply::Handled();
+	}
+	return FReply::Unhandled();
+}
 
+FReply FLGUIPrefabEditor::HandleAssetsDropOnParentActor(const TArray<FAssetData>& DroppedAssetData, AActor* InParentActor)
+{
+	const int32 NumAssets = DroppedAssetData.Num();
+	{
 		if (NumAssets > 0)
 		{
 			TArray<ULGUIPrefab*> PrefabsToLoad;
@@ -921,13 +933,13 @@ FReply FLGUIPrefabEditor::TryHandleAssetDragDropOperation(const FDragDropEvent& 
 
 			if (PrefabsToLoad.Num() > 0 || PotentialActorClassesToLoad.Num() > 0 || PotentialStaticMeshesToLoad.Num() > 0)
 			{
-				if (CurrentSelectedActor == nullptr)
+				if (InParentActor == nullptr)
 				{
 					auto MsgText = LOCTEXT("Error_NeedParentNode", "Please select a actor as parent actor");
 					FMessageDialog::Open(EAppMsgType::Ok, MsgText);
 					return FReply::Unhandled();
 				}
-				if (CurrentSelectedActor == GetPreviewScene().GetRootAgentActor())
+				if (InParentActor == GetPreviewScene().GetRootAgentActor())
 				{
 					auto MsgText = FText::Format(LOCTEXT("Error_RootCannotBeParentNode", "{0} cannot be parent actor of child prefab, please choose another actor."), FText::FromString(FLGUIPrefabEditorScene::RootAgentActorName));
 					FMessageDialog::Open(EAppMsgType::Ok, MsgText);
@@ -949,7 +961,7 @@ FReply FLGUIPrefabEditor::TryHandleAssetDragDropOperation(const FDragDropEvent& 
 					TMap<FGuid, TObjectPtr<UObject>> SubPrefabMapGuidToObject;
 					TMap<TObjectPtr<AActor>, FLGUISubPrefabData> SubSubPrefabMap;
 					auto LoadedSubPrefabRootActor = PrefabAsset->LoadPrefabWithExistingObjects(GetPreviewScene().GetWorld()
-						, CurrentSelectedActor->GetRootComponent()
+						, InParentActor->GetRootComponent()
 						, SubPrefabMapGuidToObject, SubSubPrefabMap
 					);
 
@@ -978,7 +990,7 @@ FReply FLGUIPrefabEditor::TryHandleAssetDragDropOperation(const FDragDropEvent& 
 					{
 						if (auto RootComp = Actor->GetRootComponent())
 						{
-							RootComp->AttachToComponent(CurrentSelectedActor->GetRootComponent(), FAttachmentTransformRules::KeepWorldTransform);
+							RootComp->AttachToComponent(InParentActor->GetRootComponent(), FAttachmentTransformRules::KeepWorldTransform);
 							CreatedActorArray.Add(Actor);
 						}
 						else
@@ -995,7 +1007,7 @@ FReply FLGUIPrefabEditor::TryHandleAssetDragDropOperation(const FDragDropEvent& 
 					auto MeshActor = this->GetWorld()->SpawnActor<AStaticMeshActor>();
 					MeshActor->GetStaticMeshComponent()->SetMobility(EComponentMobility::Movable);
 					MeshActor->GetStaticMeshComponent()->SetStaticMesh(Mesh);
-					MeshActor->GetStaticMeshComponent()->AttachToComponent(CurrentSelectedActor->GetRootComponent(), FAttachmentTransformRules::KeepWorldTransform);
+					MeshActor->GetStaticMeshComponent()->AttachToComponent(InParentActor->GetRootComponent(), FAttachmentTransformRules::KeepWorldTransform);
 					MeshActor->SetActorLabel(Mesh->GetName());
 					CreatedActorArray.Add(MeshActor);
 				}
@@ -1013,7 +1025,6 @@ FReply FLGUIPrefabEditor::TryHandleAssetDragDropOperation(const FDragDropEvent& 
 
 		return FReply::Handled();
 	}
-	return FReply::Unhandled();
 }
 
 UE_ENABLE_OPTIMIZATION
