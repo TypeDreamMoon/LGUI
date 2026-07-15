@@ -10,6 +10,9 @@
 #include "LGUI.h"
 #include "PrefabSystem/LGUIPrefab.h"
 #include LGUIPREFAB_SERIALIZER_NEWEST_INCLUDE
+#include "Engine/AssetManager.h"
+#include "Engine/StreamableManager.h"
+#include "LatentActions.h"
 
 void ULGUIBPLibrary::DestroyActorWithHierarchy(AActor* Target, bool WithHierarchy)
 {
@@ -23,6 +26,78 @@ AActor* ULGUIBPLibrary::LoadPrefab(UObject* WorldContextObject, ULGUIPrefab* InP
 		return nullptr;
 	}
 	return InPrefab->LoadPrefab(WorldContextObject, InParent, InCallbackBeforeAwake, SetRelativeTransformToIdentity);
+}
+
+namespace LGUIBPLibraryLocal
+{
+	// latent action for LoadPrefabAsync -- purely a completion gate, the result travels via the delegate
+	class FLoadPrefabAsyncAction : public FPendingLatentAction
+	{
+	public:
+		FName ExecutionFunction;
+		int32 OutputLink;
+		FWeakObjectPtr CallbackTarget;
+		bool bDone = false;
+
+		FLoadPrefabAsyncAction(const FLatentActionInfo& LatentInfo)
+			: ExecutionFunction(LatentInfo.ExecutionFunction)
+			, OutputLink(LatentInfo.Linkage)
+			, CallbackTarget(LatentInfo.CallbackTarget)
+		{}
+
+		virtual void UpdateOperation(FLatentResponse& Response) override
+		{
+			Response.FinishAndTriggerIf(bDone, ExecutionFunction, OutputLink, CallbackTarget);
+		}
+	};
+}
+
+void ULGUIBPLibrary::LoadPrefabAsync(UObject* WorldContextObject, TSoftObjectPtr<ULGUIPrefab> InPrefab, USceneComponent* InParent, FLGUIPrefab_LoadPrefabCallback OnLoaded, FLatentActionInfo LatentInfo, bool SetRelativeTransformToIdentity)
+{
+	using namespace LGUIBPLibraryLocal;
+	UWorld* World = GEngine->GetWorldFromContextObject(WorldContextObject, EGetWorldErrorMode::LogAndReturnNull);
+	if (World == nullptr)return;
+	if (InPrefab.IsNull())
+	{
+		UE_LOG(LGUI, Error, TEXT("[%s].%d InPrefab not set"), ANSI_TO_TCHAR(__FUNCTION__), __LINE__);
+		OnLoaded.ExecuteIfBound(nullptr);
+		return;
+	}
+
+	FLatentActionManager& LatentManager = World->GetLatentActionManager();
+	if (LatentManager.FindExistingAction<FLoadPrefabAsyncAction>(LatentInfo.CallbackTarget, LatentInfo.UUID) != nullptr)
+	{
+		return;//already in flight for this node
+	}
+	LatentManager.AddNewAction(LatentInfo.CallbackTarget, LatentInfo.UUID, new FLoadPrefabAsyncAction(LatentInfo));
+
+	// stream the prefab asset; its hard reference lists pull the referenced assets along, so the
+	// asset I/O happens off the game thread. Actor construction below stays synchronous.
+	UAssetManager::GetStreamableManager().RequestAsyncLoad(InPrefab.ToSoftObjectPath(),
+		FStreamableDelegate::CreateLambda(
+			[WeakWorld = TWeakObjectPtr<UWorld>(World), InPrefab, WeakParent = TWeakObjectPtr<USceneComponent>(InParent)
+			, OnLoaded, SetRelativeTransformToIdentity
+			, CallbackTarget = FWeakObjectPtr(LatentInfo.CallbackTarget), UUID = LatentInfo.UUID]()
+			{
+				UWorld* LoadedWorld = WeakWorld.Get();
+				if (LoadedWorld == nullptr)return;//world is gone (level change), drop silently
+
+				AActor* LoadedRootActor = nullptr;
+				if (ULGUIPrefab* PrefabAsset = InPrefab.Get())
+				{
+					LoadedRootActor = PrefabAsset->LoadPrefab(LoadedWorld, WeakParent.Get(), SetRelativeTransformToIdentity);
+				}
+				else
+				{
+					UE_LOG(LGUI, Error, TEXT("[LoadPrefabAsync] failed to load prefab asset %s"), *InPrefab.ToString());
+				}
+				OnLoaded.ExecuteIfBound(LoadedRootActor);
+
+				if (auto Action = LoadedWorld->GetLatentActionManager().FindExistingAction<FLoadPrefabAsyncAction>(CallbackTarget.Get(), UUID))
+				{
+					Action->bDone = true;
+				}
+			}));
 }
 AActor* ULGUIBPLibrary::LoadPrefabWithTransform(UObject* WorldContextObject, ULGUIPrefab* InPrefab, USceneComponent* InParent, FVector Location, FRotator Rotation, FVector Scale, const FLGUIPrefab_LoadPrefabCallback& InCallbackBeforeAwake)
 {
