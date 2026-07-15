@@ -3,6 +3,11 @@
 #include "SLGUIPrefabPalette.h"
 #include "LGUIPrefabEditor.h"
 #include "PrefabSystem/LGUIPrefab.h"
+#include "Core/LGUILifeCycleBehaviour.h"
+#include "GeometryModifier/UIGeometryModifierBase.h"
+#include "Interaction/UISelectableComponent.h"
+#include "Layout/UILayoutBase.h"
+#include "Layout/UILayoutElement.h"
 
 #include "AssetRegistry/IAssetRegistry.h"
 #include "AssetThumbnail.h"
@@ -16,6 +21,8 @@
 #include "Modules/ModuleManager.h"
 #include "ScopedTransaction.h"
 #include "Styling/AppStyle.h"
+#include "Styling/SlateIconFinder.h"
+#include "UObject/UObjectHash.h"
 #include "Widgets/Images/SImage.h"
 #include "Widgets/Input/SCheckBox.h"
 #include "Widgets/Input/SEditableTextBox.h"
@@ -144,6 +151,109 @@ FString SLGUIPrefabPalette::GetCategoryForAsset(const FAssetData& InAssetData)co
 	return InAssetData.GetTagValueRef<FString>(LGUIPrefabPaletteLocal::PaletteCategoryTagName);
 }
 
+void SLGUIPrefabPalette::CollectComponentClassGroups(TArray<FItemPtr>& OutGroupHeaders, FItemPtr& InOutFavoritesHeader)
+{
+	// LGUI behaviour components (interaction, layout, custom scripts) plus geometry-modifier
+	// effects (UIEffect*), whose base derives straight from UActorComponent
+	TArray<UClass*> CandidateClasses;
+	GetDerivedClasses(ULGUILifeCycleBehaviour::StaticClass(), CandidateClasses, true);
+	{
+		TArray<UClass*> EffectClasses;
+		GetDerivedClasses(UUIGeometryModifierBase::StaticClass(), EffectClasses, true);
+		for (auto& EffectClass : EffectClasses)
+		{
+			CandidateClasses.AddUnique(EffectClass);
+		}
+	}
+
+	const bool bFilterActive = !SearchFilter.GetFilterText().IsEmpty();
+	// fixed group order: most used first
+	const FString GroupInteraction = TEXT("Components · Interaction");
+	const FString GroupLayout = TEXT("Components · Layout");
+	const FString GroupEffect = TEXT("Components · Effect");
+	const FString GroupBehaviour = TEXT("Components · Behaviour");
+	TMap<FString, FItemPtr> GroupMap;
+	auto GetGroupHeader = [&GroupMap](const FString& GroupName) -> FItemPtr&
+		{
+			FItemPtr& Header = GroupMap.FindOrAdd(GroupName);
+			if (!Header.IsValid())
+			{
+				Header = MakeShared<FLGUIPrefabPaletteItem>();
+				Header->CategoryName = GroupName;
+				Header->bIsComponentGroup = true;
+			}
+			return Header;
+		};
+
+	for (auto& Class : CandidateClasses)
+	{
+		if (Class->HasAnyClassFlags(CLASS_Abstract | CLASS_Deprecated | CLASS_HideDropDown | CLASS_NewerVersionExists))
+		{
+			continue;
+		}
+		// skip blueprint skeleton/reinstanced classes
+		const FString ClassName = Class->GetName();
+		if (ClassName.StartsWith(TEXT("SKEL_")) || ClassName.StartsWith(TEXT("REINST_")))
+		{
+			continue;
+		}
+
+		const FString DisplayName = Class->GetDisplayNameText().ToString();
+		if (bFilterActive
+			&& !SearchFilter.TestTextFilter(FBasicStringFilterExpressionContext(DisplayName))
+			&& !SearchFilter.TestTextFilter(FBasicStringFilterExpressionContext(ClassName)))
+		{
+			continue;
+		}
+
+		FString GroupName;
+		if (Class->IsChildOf(UUISelectableComponent::StaticClass()))
+		{
+			GroupName = GroupInteraction;
+		}
+		else if (Class->IsChildOf(UUILayoutBase::StaticClass()) || Class->IsChildOf(UUILayoutElement::StaticClass()))
+		{
+			GroupName = GroupLayout;
+		}
+		else if (Class->IsChildOf(UUIGeometryModifierBase::StaticClass()))
+		{
+			GroupName = GroupEffect;
+		}
+		else
+		{
+			GroupName = GroupBehaviour;
+		}
+
+		auto Item = MakeShared<FLGUIPrefabPaletteItem>();
+		Item->ComponentClass = Class;
+		GetGroupHeader(GroupName)->Children.Add(Item);
+
+		if (FavoritePaths.Contains(Class->GetClassPathName().ToString()))
+		{
+			if (!InOutFavoritesHeader.IsValid())
+			{
+				InOutFavoritesHeader = MakeShared<FLGUIPrefabPaletteItem>();
+				InOutFavoritesHeader->bIsFavoritesGroup = true;
+			}
+			auto FavItem = MakeShared<FLGUIPrefabPaletteItem>();
+			FavItem->ComponentClass = Class;
+			InOutFavoritesHeader->Children.Add(FavItem);
+		}
+	}
+
+	// emit in fixed order, sort children by display name
+	for (const FString& GroupName : { GroupInteraction, GroupLayout, GroupEffect, GroupBehaviour })
+	{
+		if (FItemPtr* Header = GroupMap.Find(GroupName))
+		{
+			(*Header)->Children.Sort([](const FItemPtr& A, const FItemPtr& B) {
+				return A->ComponentClass->GetDisplayNameText().CompareTo(B->ComponentClass->GetDisplayNameText()) < 0;
+				});
+			OutGroupHeaders.Add(*Header);
+		}
+	}
+}
+
 void SLGUIPrefabPalette::RebuildList()
 {
 	RootItems.Reset();
@@ -218,6 +328,16 @@ void SLGUIPrefabPalette::RebuildList()
 		}
 		return A->CategoryName < B->CategoryName;
 		});
+	// component-class groups (Interaction/Layout/Effect/Behaviour) above the prefab categories;
+	// may also append favorited classes to FavoritesHeader
+	{
+		TArray<FItemPtr> ComponentGroups;
+		CollectComponentClassGroups(ComponentGroups, FavoritesHeader);
+		for (int i = ComponentGroups.Num() - 1; i >= 0; i--)
+		{
+			RootItems.Insert(ComponentGroups[i], 0);
+		}
+	}
 	// Favorites pinned to the very top
 	if (FavoritesHeader.IsValid())
 	{
@@ -271,6 +391,50 @@ TSharedRef<ITableRow> SLGUIPrefabPalette::OnGenerateRow(FItemPtr InItem, const T
 					.Font(FAppStyle::Get().GetFontStyle("SmallFontBold"))
 					.Text(HeaderText.ToUpper())
 					.ColorAndOpacity(FSlateColor::UseSubduedForeground())
+				]
+			];
+	}
+
+	if (InItem->IsComponentClass())
+	{
+		UClass* Class = InItem->ComponentClass.Get();
+		return SNew(STableRow<FItemPtr>, OwnerTable)
+			.Padding(FMargin(2, 2))
+			.OnDragDetected(FOnDragDetected::CreateSP(this, &SLGUIPrefabPalette::OnItemDragDetected, InItem))
+			.ToolTipText(FText::Format(LOCTEXT("ComponentRowTooltip", "{0}\nDrag onto an actor (viewport or outliner row) to add this component. Double-click adds it to the selected actor.")
+				, FText::FromString(Class->GetClassPathName().ToString())))
+			[
+				SNew(SHorizontalBox)
+				+ SHorizontalBox::Slot()
+				.AutoWidth()
+				.VAlign(VAlign_Center)
+				.Padding(2, 0, 6, 0)
+				[
+					SNew(SImage)
+					.Image(FSlateIconFinder::FindIconBrushForClass(Class))
+					.DesiredSizeOverride(FVector2D(16, 16))
+				]
+				+ SHorizontalBox::Slot()
+				.FillWidth(1.0f)
+				.VAlign(VAlign_Center)
+				[
+					SNew(STextBlock)
+					.Text(Class->GetDisplayNameText())
+				]
+				+ SHorizontalBox::Slot()
+				.AutoWidth()
+				.VAlign(VAlign_Center)
+				.Padding(4, 0)
+				[
+					SNew(SImage)
+					.Image(FAppStyle::Get().GetBrush("Icons.Star"))
+					.DesiredSizeOverride(FVector2D(10, 10))
+					.ColorAndOpacity(FSlateColor::UseSubduedForeground())
+					.Visibility_Lambda([this, WeakItem = TWeakPtr<FLGUIPrefabPaletteItem>(InItem)]()
+						{
+							auto Pinned = WeakItem.Pin();
+							return (Pinned.IsValid() && FavoritePaths.Contains(GetItemFavoriteKey(Pinned))) ? EVisibility::Visible : EVisibility::Collapsed;
+						})
 				]
 			];
 	}
@@ -340,6 +504,12 @@ void SLGUIPrefabPalette::OnSearchTextChanged(const FText& InText)
 
 FReply SLGUIPrefabPalette::OnItemDragDetected(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent, FItemPtr InItem)
 {
+	if (InItem.IsValid() && InItem->IsComponentClass())
+	{
+		// a UClass is a UObject, so it travels as a standard asset drag; the drop path
+		// recognizes component classes and adds the component to the target actor
+		return FReply::Handled().BeginDragDrop(FAssetDragDropOp::New(FAssetData(InItem->ComponentClass.Get())));
+	}
 	if (InItem.IsValid() && !InItem->IsCategory())
 	{
 		// standard asset drag: the viewport's existing OnDrop path (TryHandleAssetDragDropOperation)
@@ -351,7 +521,11 @@ FReply SLGUIPrefabPalette::OnItemDragDetected(const FGeometry& MyGeometry, const
 
 void SLGUIPrefabPalette::OnItemDoubleClick(FItemPtr InItem)
 {
-	if (InItem.IsValid() && !InItem->IsCategory())
+	if (InItem.IsValid() && InItem->IsComponentClass())
+	{
+		AddComponentToSelectedActor(InItem);
+	}
+	else if (InItem.IsValid() && !InItem->IsCategory())
 	{
 		BrowseToAsset(InItem);
 	}
@@ -359,6 +533,29 @@ void SLGUIPrefabPalette::OnItemDoubleClick(FItemPtr InItem)
 	{
 		TreeView->SetItemExpansion(InItem, !TreeView->IsItemExpanded(InItem));
 	}
+}
+
+void SLGUIPrefabPalette::AddComponentToSelectedActor(FItemPtr InItem)
+{
+	if (!InItem.IsValid() || !InItem->IsComponentClass())return;
+	if (auto PrefabEditor = PrefabEditorPtr.Pin())
+	{
+		// reuse the shared drop path: it validates the parent (null / root agent) with
+		// user-facing messages and handles the transaction
+		PrefabEditor->HandleAssetsDropOnParentActor(
+			TArray<FAssetData>{ FAssetData(InItem->ComponentClass.Get()) },
+			PrefabEditor->GetCurrentSelectedActor());
+	}
+}
+
+FString SLGUIPrefabPalette::GetItemFavoriteKey(FItemPtr InItem)const
+{
+	if (!InItem.IsValid())return FString();
+	if (InItem->IsComponentClass())
+	{
+		return InItem->ComponentClass->GetClassPathName().ToString();
+	}
+	return InItem->Asset.GetSoftObjectPath().ToString();
 }
 
 TSharedPtr<SWidget> SLGUIPrefabPalette::OnContextMenuOpening()
@@ -371,12 +568,35 @@ TSharedPtr<SWidget> SLGUIPrefabPalette::OnContextMenuOpening()
 	FItemPtr Item = SelectedItems[0];
 
 	FMenuBuilder MenuBuilder(true, nullptr);
+
+	// component class rows get a reduced menu: favorite toggle + add-to-selected
+	if (Item->IsComponentClass())
+	{
+		MenuBuilder.BeginSection(NAME_None, LOCTEXT("ComponentSection", "Component"));
+		{
+			const bool bIsClassFavorite = FavoritePaths.Contains(GetItemFavoriteKey(Item));
+			MenuBuilder.AddMenuEntry(
+				bIsClassFavorite ? LOCTEXT("RemoveFromFavorites", "Remove from Favorites") : LOCTEXT("AddToFavorites", "Add to Favorites"),
+				LOCTEXT("ToggleFavoriteTooltip", "Favorited entries are pinned in the Favorites group at the top of the palette"),
+				FSlateIcon(FAppStyle::GetAppStyleSetName(), "Icons.Star"),
+				FUIAction(FExecuteAction::CreateSP(this, &SLGUIPrefabPalette::ToggleFavorite, Item)));
+
+			MenuBuilder.AddMenuEntry(
+				LOCTEXT("AddToSelectedActor", "Add to Selected Actor"),
+				LOCTEXT("AddToSelectedActorTooltip", "Add this component to the actor selected in the outliner (same as double-click)"),
+				FSlateIcon(FAppStyle::GetAppStyleSetName(), "Icons.Plus"),
+				FUIAction(FExecuteAction::CreateSP(this, &SLGUIPrefabPalette::AddComponentToSelectedActor, Item)));
+		}
+		MenuBuilder.EndSection();
+		return MenuBuilder.MakeWidget();
+	}
+
 	MenuBuilder.BeginSection(NAME_None, LOCTEXT("PrefabSection", "Prefab"));
 	{
 		const bool bIsFavorite = IsFavorite(Item->Asset);
 		MenuBuilder.AddMenuEntry(
 			bIsFavorite ? LOCTEXT("RemoveFromFavorites", "Remove from Favorites") : LOCTEXT("AddToFavorites", "Add to Favorites"),
-			LOCTEXT("ToggleFavoriteTooltip", "Favorited prefabs are pinned in the Favorites group at the top of the palette"),
+			LOCTEXT("ToggleFavoriteTooltip2", "Favorited prefabs are pinned in the Favorites group at the top of the palette"),
 			FSlateIcon(FAppStyle::GetAppStyleSetName(), "Icons.Star"),
 			FUIAction(FExecuteAction::CreateSP(this, &SLGUIPrefabPalette::ToggleFavorite, Item)));
 
@@ -499,14 +719,14 @@ bool SLGUIPrefabPalette::IsFavorite(const FAssetData& InAssetData)const
 void SLGUIPrefabPalette::ToggleFavorite(FItemPtr InItem)
 {
 	if (!InItem.IsValid() || InItem->IsCategory())return;
-	const FString Path = InItem->Asset.GetSoftObjectPath().ToString();
-	if (FavoritePaths.Contains(Path))
+	const FString Key = GetItemFavoriteKey(InItem);
+	if (FavoritePaths.Contains(Key))
 	{
-		FavoritePaths.Remove(Path);
+		FavoritePaths.Remove(Key);
 	}
 	else
 	{
-		FavoritePaths.Add(Path);
+		FavoritePaths.Add(Key);
 	}
 	SaveFavorites();
 	RequestRebuild();

@@ -16,6 +16,7 @@
 #include "Engine/StaticMeshActor.h"
 #include "AssetSelection.h"
 #include "DragAndDrop/AssetDragDropOp.h"
+#include "Kismet2/ComponentEditorUtils.h"
 #include "Misc/FeedbackContext.h"
 #include "LGUIPrefabEditorCommand.h"
 #include "Framework/MultiBox/MultiBoxExtender.h"
@@ -867,6 +868,7 @@ FReply FLGUIPrefabEditor::HandleAssetsDropOnParentActor(const TArray<FAssetData>
 		{
 			TArray<ULGUIPrefab*> PrefabsToLoad;
 			TArray<UClass*> PotentialActorClassesToLoad;
+			TArray<UClass*> PotentialComponentClassesToLoad;
 			TArray<UStaticMesh*> PotentialStaticMeshesToLoad;
 			auto IsSupportedActorClass = [](UClass* ActorClass) {
 				if (ActorClass->HasAnyClassFlags(EClassFlags::CLASS_NotPlaceable | EClassFlags::CLASS_Abstract))
@@ -900,6 +902,13 @@ FReply FLGUIPrefabEditor::HandleAssetsDropOnParentActor(const TArray<FAssetData>
 					if (IsSupportedActorClass(AssetAsClass))
 					{
 						PotentialActorClass = AssetAsClass;
+					}
+					else if (AssetAsClass->IsChildOf(UActorComponent::StaticClass())
+						&& !AssetAsClass->HasAnyClassFlags(EClassFlags::CLASS_Abstract))
+					{
+						// component class (e.g. dragged from the Prefab Palette's component groups):
+						// add the component to the parent actor
+						PotentialComponentClassesToLoad.Add(AssetAsClass);
 					}
 				}
 				if (auto PrefabAsset = Cast<ULGUIPrefab>(Asset))
@@ -935,7 +944,7 @@ FReply FLGUIPrefabEditor::HandleAssetsDropOnParentActor(const TArray<FAssetData>
 				}
 			}
 
-			if (PrefabsToLoad.Num() > 0 || PotentialActorClassesToLoad.Num() > 0 || PotentialStaticMeshesToLoad.Num() > 0)
+			if (PrefabsToLoad.Num() > 0 || PotentialActorClassesToLoad.Num() > 0 || PotentialStaticMeshesToLoad.Num() > 0 || PotentialComponentClassesToLoad.Num() > 0)
 			{
 				if (InParentActor == nullptr)
 				{
@@ -1016,6 +1025,20 @@ FReply FLGUIPrefabEditor::HandleAssetsDropOnParentActor(const TArray<FAssetData>
 					CreatedActorArray.Add(MeshActor);
 				}
 			}
+			UActorComponent* LastCreatedComponent = nullptr;
+			if (PotentialComponentClassesToLoad.Num() > 0)
+			{
+				InParentActor->Modify();
+				for (auto& ComponentClass : PotentialComponentClassesToLoad)
+				{
+					// same recipe as LGUIEditorTools::AttachComponentToSelectedActor
+					auto Component = NewObject<UActorComponent>(InParentActor, ComponentClass
+						, *FComponentEditorUtils::GenerateValidVariableName(ComponentClass, InParentActor), RF_Transactional);
+					InParentActor->AddInstanceComponent(Component);
+					Component->RegisterComponent();
+					LastCreatedComponent = Component;
+				}
+			}
 			if (CreatedActorArray.Num() > 0)
 			{
 				GEditor->SelectNone(true, true);
@@ -1023,6 +1046,13 @@ FReply FLGUIPrefabEditor::HandleAssetsDropOnParentActor(const TArray<FAssetData>
 				{
 					GEditor->SelectActor(Actor, true, true, false, true);
 				}
+			}
+			else if (LastCreatedComponent != nullptr)
+			{
+				// select the owner (and the new component) so the details panel shows the result
+				GEditor->SelectNone(true, true);
+				GEditor->SelectActor(InParentActor, true, true, false, true);
+				GEditor->SelectComponent(LastCreatedComponent, true, true, false);
 			}
 			GEditor->EndTransaction();
 		}

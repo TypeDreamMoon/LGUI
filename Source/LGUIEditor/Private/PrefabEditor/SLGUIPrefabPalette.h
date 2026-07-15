@@ -14,18 +14,23 @@ class FAssetThumbnailPool;
 class ULGUIPrefab;
 
 /**
- * One node of the palette tree: either a category header (Asset invalid, CategoryName set)
- * or a prefab asset row (Asset valid).
+ * One node of the palette tree: a category header (CategoryName set), a prefab asset row
+ * (Asset valid), or a component class row (ComponentClass valid).
  */
 struct FLGUIPrefabPaletteItem
 {
 	FAssetData Asset;
+	/** LGUI behaviour/effect component class (drag onto an actor to add the component). */
+	TWeakObjectPtr<UClass> ComponentClass;
 	FString CategoryName;
 	/** True on the pinned "Favorites" header (distinguishes it from a user category literally named "Favorites"). */
 	bool bIsFavoritesGroup = false;
+	/** True on the fixed component-class group headers (Interaction/Layout/Effect/Behaviour). */
+	bool bIsComponentGroup = false;
 	TArray<TSharedPtr<FLGUIPrefabPaletteItem>> Children;
 
-	bool IsCategory()const { return !Asset.IsValid(); }
+	bool IsComponentClass()const { return ComponentClass.IsValid(); }
+	bool IsCategory()const { return !Asset.IsValid() && !ComponentClass.IsValid(); }
 };
 
 /**
@@ -77,6 +82,12 @@ private:
 	// hide-in-palette (stored on the prefab asset, ULGUIPrefab::bHideInPalette)
 	bool IsAssetHiddenInPalette(const FAssetData& InAssetData)const;
 	void ToggleItemHidden(FItemPtr InItem);
+
+	// component class rows
+	void CollectComponentClassGroups(TArray<FItemPtr>& OutGroupHeaders, FItemPtr& InOutFavoritesHeader);
+	void AddComponentToSelectedActor(FItemPtr InItem);
+	/** Favorites key: object path for assets, class path for component classes. */
+	FString GetItemFavoriteKey(FItemPtr InItem)const;
 
 	// asset registry change handlers (may fire off the game thread -- only set the dirty flag)
 	void OnAssetChanged(const FAssetData& InAssetData);

@@ -71,6 +71,7 @@ public:
 	FLGUIPrefabEditorScene& GetPreviewScene();
 	UWorld* GetWorld();
 	ULGUIPrefab* GetPrefabBeingEdited()const { return PrefabBeingEdited; }
+	AActor* GetCurrentSelectedActor()const { return CurrentSelectedActor.Get(); }
 
 	void DeleteActors(const TArray<TWeakObjectPtr<AActor>>& InSelectedActorArray);
 

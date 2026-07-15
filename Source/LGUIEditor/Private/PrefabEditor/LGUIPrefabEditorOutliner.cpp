@@ -59,8 +59,23 @@ public:
 				AActor* TargetActor = ActorItem->Actor.Get();
 				if (TargetActor != nullptr && !FLGUIPrefabEditor::ActorIsRootAgent(TargetActor))
 				{
+					// distinguish "add component to X" from "add child under X" in the hover hint
+					auto& AssetOp = static_cast<const FAssetDragDropOp&>(Payload.SourceOperation);
+					bool bAllComponentClasses = AssetOp.GetAssets().Num() > 0;
+					for (const FAssetData& AssetData : AssetOp.GetAssets())
+					{
+						UClass* AsClass = AssetData.IsAssetLoaded() ? Cast<UClass>(AssetData.GetAsset()) : nullptr;
+						if (AsClass == nullptr || !AsClass->IsChildOf(UActorComponent::StaticClass()))
+						{
+							bAllComponentClasses = false;
+							break;
+						}
+					}
 					return FSceneOutlinerDragValidationInfo(ESceneOutlinerDropCompatibility::CompatibleAttach
-						, FText::Format(LOCTEXT("DropAssetOnActor", "Add under {0}"), FText::FromString(TargetActor->GetActorLabel())));
+						, FText::Format(bAllComponentClasses
+							? LOCTEXT("DropComponentOnActor", "Add component to {0}")
+							: LOCTEXT("DropAssetOnActor", "Add under {0}")
+							, FText::FromString(TargetActor->GetActorLabel())));
 				}
 			}
 			return FSceneOutlinerDragValidationInfo(ESceneOutlinerDropCompatibility::IncompatibleGeneric
