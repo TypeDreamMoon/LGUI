@@ -34,4 +34,13 @@ public:
 	TSharedPtr<FUICommandInfo> DuplicateActor;
 	TSharedPtr<FUICommandInfo> DestroyActor;
 	TSharedPtr<FUICommandInfo> DestroyActorKeepChildren;
+	// align/distribute selected UI elements (UMG-designer-style layout commands)
+	TSharedPtr<FUICommandInfo> AlignLeft;
+	TSharedPtr<FUICommandInfo> AlignHCenter;
+	TSharedPtr<FUICommandInfo> AlignRight;
+	TSharedPtr<FUICommandInfo> AlignTop;
+	TSharedPtr<FUICommandInfo> AlignVMiddle;
+	TSharedPtr<FUICommandInfo> AlignBottom;
+	TSharedPtr<FUICommandInfo> DistributeHorizontal;
+	TSharedPtr<FUICommandInfo> DistributeVertical;
 };

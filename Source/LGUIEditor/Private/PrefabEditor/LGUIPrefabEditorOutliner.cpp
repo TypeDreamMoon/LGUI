@@ -136,6 +136,26 @@ public:
 			MenuBuilder.AddMenuEntry(FGenericCommands::Get().Duplicate);
 		}
 		MenuBuilder.EndSection();
+		MenuBuilder.BeginSection("LGUIPrefabOutlinerAlign", LOCTEXT("OutlinerAlignSection", "Align"));
+		{
+			MenuBuilder.AddSubMenu(
+				LOCTEXT("AlignSubMenu", "Align / Distribute"),
+				LOCTEXT("AlignSubMenuTooltip", "Align or evenly distribute the selected UI elements"),
+				FNewMenuDelegate::CreateLambda([&Commands](FMenuBuilder& SubMenu)
+					{
+						SubMenu.AddMenuEntry(Commands.AlignLeft);
+						SubMenu.AddMenuEntry(Commands.AlignHCenter);
+						SubMenu.AddMenuEntry(Commands.AlignRight);
+						SubMenu.AddSeparator();
+						SubMenu.AddMenuEntry(Commands.AlignTop);
+						SubMenu.AddMenuEntry(Commands.AlignVMiddle);
+						SubMenu.AddMenuEntry(Commands.AlignBottom);
+						SubMenu.AddSeparator();
+						SubMenu.AddMenuEntry(Commands.DistributeHorizontal);
+						SubMenu.AddMenuEntry(Commands.DistributeVertical);
+					}));
+		}
+		MenuBuilder.EndSection();
 		MenuBuilder.BeginSection("LGUIPrefabOutlinerDelete", LOCTEXT("OutlinerDeleteSection", "Delete"));
 		{
 			MenuBuilder.AddMenuEntry(Commands.DestroyActor);

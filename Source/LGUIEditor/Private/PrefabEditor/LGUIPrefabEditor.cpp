@@ -18,6 +18,8 @@
 #include "DragAndDrop/AssetDragDropOp.h"
 #include "Kismet2/ComponentEditorUtils.h"
 #include "Misc/FeedbackContext.h"
+#include "ScopedTransaction.h"
+#include "Core/ActorComponent/UIItem.h"
 #include "LGUIPrefabEditorCommand.h"
 #include "Framework/Commands/GenericCommands.h"
 #include "Framework/MultiBox/MultiBoxExtender.h"
@@ -620,6 +622,144 @@ void FLGUIPrefabEditor::DeleteActors(const TArray<TWeakObjectPtr<AActor>>& InSel
 	}
 }
 
+namespace LGUIPrefabEditorAlignLocal
+{
+	// world-space rect of a UIItem on the UI plane (world Y = horizontal, world Z = vertical)
+	struct FWorldRect
+	{
+		UUIItem* Item = nullptr;
+		double MinY = 0, MaxY = 0, MinZ = 0, MaxZ = 0;
+		double CenterY()const { return (MinY + MaxY) * 0.5; }
+		double CenterZ()const { return (MinZ + MaxZ) * 0.5; }
+	};
+
+	static FWorldRect ComputeWorldRect(UUIItem* InItem)
+	{
+		const auto& Transform = InItem->GetComponentTransform();
+		const FVector Corners[4] =
+		{
+			Transform.TransformPosition(FVector(0, InItem->GetLocalSpaceLeft(), InItem->GetLocalSpaceBottom())),
+			Transform.TransformPosition(FVector(0, InItem->GetLocalSpaceRight(), InItem->GetLocalSpaceBottom())),
+			Transform.TransformPosition(FVector(0, InItem->GetLocalSpaceLeft(), InItem->GetLocalSpaceTop())),
+			Transform.TransformPosition(FVector(0, InItem->GetLocalSpaceRight(), InItem->GetLocalSpaceTop())),
+		};
+		FWorldRect Result;
+		Result.Item = InItem;
+		Result.MinY = Result.MaxY = Corners[0].Y;
+		Result.MinZ = Result.MaxZ = Corners[0].Z;
+		for (int i = 1; i < 4; i++)
+		{
+			Result.MinY = FMath::Min(Result.MinY, Corners[i].Y);
+			Result.MaxY = FMath::Max(Result.MaxY, Corners[i].Y);
+			Result.MinZ = FMath::Min(Result.MinZ, Corners[i].Z);
+			Result.MaxZ = FMath::Max(Result.MaxZ, Corners[i].Z);
+		}
+		return Result;
+	}
+
+	// apply a world-space delta on the UI plane to the item's AnchoredPosition
+	static void ApplyWorldDelta(UUIItem* InItem, double InDeltaY, double InDeltaZ)
+	{
+		if (FMath::IsNearlyZero(InDeltaY) && FMath::IsNearlyZero(InDeltaZ))return;
+		FVector LocalDelta(0, InDeltaY, InDeltaZ);
+		if (auto Parent = InItem->GetParentUIItem())
+		{
+			LocalDelta = Parent->GetComponentTransform().InverseTransformVector(FVector(0, InDeltaY, InDeltaZ));
+		}
+		InItem->Modify();
+		InItem->SetAnchoredPosition(InItem->GetAnchoredPosition() + FVector2D(LocalDelta.Y, LocalDelta.Z));
+	}
+}
+
+TArray<UUIItem*> FLGUIPrefabEditor::GetSelectedUIItems()const
+{
+	TArray<UUIItem*> Result;
+	for (FSelectionIterator It(GEditor->GetSelectedActorIterator()); It; ++It)
+	{
+		if (AActor* Actor = Cast<AActor>(*It))
+		{
+			if (Actor->GetWorld() != PreviewScene.GetWorld())continue;
+			if (Actor == PreviewScene.GetRootAgentActor())continue;
+			if (auto UIItem = Cast<UUIItem>(Actor->GetRootComponent()))
+			{
+				Result.Add(UIItem);
+			}
+		}
+	}
+	return Result;
+}
+
+void FLGUIPrefabEditor::AlignSelectedUIItems(EAlignType InType)
+{
+	using namespace LGUIPrefabEditorAlignLocal;
+	auto Items = GetSelectedUIItems();
+	if (Items.Num() < 2)return;
+
+	TArray<FWorldRect> Rects;
+	for (auto& Item : Items)
+	{
+		Rects.Add(ComputeWorldRect(Item));
+	}
+	// selection bounds
+	double MinY = Rects[0].MinY, MaxY = Rects[0].MaxY, MinZ = Rects[0].MinZ, MaxZ = Rects[0].MaxZ;
+	for (auto& Rect : Rects)
+	{
+		MinY = FMath::Min(MinY, Rect.MinY); MaxY = FMath::Max(MaxY, Rect.MaxY);
+		MinZ = FMath::Min(MinZ, Rect.MinZ); MaxZ = FMath::Max(MaxZ, Rect.MaxZ);
+	}
+
+	FScopedTransaction Transaction(LOCTEXT("AlignUIElements_Transaction", "LGUI Align UI Elements"));
+	for (auto& Rect : Rects)
+	{
+		double DeltaY = 0, DeltaZ = 0;
+		switch (InType)
+		{
+		case EAlignType::Left:    DeltaY = MinY - Rect.MinY; break;
+		case EAlignType::HCenter: DeltaY = (MinY + MaxY) * 0.5 - Rect.CenterY(); break;
+		case EAlignType::Right:   DeltaY = MaxY - Rect.MaxY; break;
+		case EAlignType::Bottom:  DeltaZ = MinZ - Rect.MinZ; break;
+		case EAlignType::VMiddle: DeltaZ = (MinZ + MaxZ) * 0.5 - Rect.CenterZ(); break;
+		case EAlignType::Top:     DeltaZ = MaxZ - Rect.MaxZ; break;
+		}
+		ApplyWorldDelta(Rect.Item, DeltaY, DeltaZ);
+	}
+}
+
+void FLGUIPrefabEditor::DistributeSelectedUIItems(bool bHorizontal)
+{
+	using namespace LGUIPrefabEditorAlignLocal;
+	auto Items = GetSelectedUIItems();
+	if (Items.Num() < 3)return;
+
+	TArray<FWorldRect> Rects;
+	for (auto& Item : Items)
+	{
+		Rects.Add(ComputeWorldRect(Item));
+	}
+	Rects.Sort([bHorizontal](const FWorldRect& A, const FWorldRect& B)
+		{
+			return bHorizontal ? A.CenterY() < B.CenterY() : A.CenterZ() < B.CenterZ();
+		});
+
+	const double First = bHorizontal ? Rects[0].CenterY() : Rects[0].CenterZ();
+	const double Last = bHorizontal ? Rects.Last().CenterY() : Rects.Last().CenterZ();
+	const double Step = (Last - First) / (Rects.Num() - 1);
+
+	FScopedTransaction Transaction(LOCTEXT("DistributeUIElements_Transaction", "LGUI Distribute UI Elements"));
+	for (int i = 1; i < Rects.Num() - 1; i++)
+	{
+		const double Target = First + Step * i;
+		if (bHorizontal)
+		{
+			ApplyWorldDelta(Rects[i].Item, Target - Rects[i].CenterY(), 0);
+		}
+		else
+		{
+			ApplyWorldDelta(Rects[i].Item, 0, Target - Rects[i].CenterZ());
+		}
+	}
+}
+
 void FLGUIPrefabEditor::DeleteSelectedActors_KeepChildren()
 {
 	TArray<TWeakObjectPtr<AActor>> SelectedActors;
@@ -812,6 +952,26 @@ void FLGUIPrefabEditor::BindCommands()
 		FGetActionCheckState(),
 		FIsActionButtonVisible::CreateStatic(&LGUIEditorTools::CanDeleteActor)
 	);
+
+	// align / distribute (no default chords -- users can bind them in Editor Preferences > Keyboard Shortcuts)
+	auto CanAlign = FCanExecuteAction::CreateLambda([this]() { return GetSelectedUIItems().Num() >= 2; });
+	auto CanDistribute = FCanExecuteAction::CreateLambda([this]() { return GetSelectedUIItems().Num() >= 3; });
+	ToolkitCommands->MapAction(PrefabEditorCommands.AlignLeft,
+		FExecuteAction::CreateSP(this, &FLGUIPrefabEditor::AlignSelectedUIItems, EAlignType::Left), CanAlign);
+	ToolkitCommands->MapAction(PrefabEditorCommands.AlignHCenter,
+		FExecuteAction::CreateSP(this, &FLGUIPrefabEditor::AlignSelectedUIItems, EAlignType::HCenter), CanAlign);
+	ToolkitCommands->MapAction(PrefabEditorCommands.AlignRight,
+		FExecuteAction::CreateSP(this, &FLGUIPrefabEditor::AlignSelectedUIItems, EAlignType::Right), CanAlign);
+	ToolkitCommands->MapAction(PrefabEditorCommands.AlignTop,
+		FExecuteAction::CreateSP(this, &FLGUIPrefabEditor::AlignSelectedUIItems, EAlignType::Top), CanAlign);
+	ToolkitCommands->MapAction(PrefabEditorCommands.AlignVMiddle,
+		FExecuteAction::CreateSP(this, &FLGUIPrefabEditor::AlignSelectedUIItems, EAlignType::VMiddle), CanAlign);
+	ToolkitCommands->MapAction(PrefabEditorCommands.AlignBottom,
+		FExecuteAction::CreateSP(this, &FLGUIPrefabEditor::AlignSelectedUIItems, EAlignType::Bottom), CanAlign);
+	ToolkitCommands->MapAction(PrefabEditorCommands.DistributeHorizontal,
+		FExecuteAction::CreateSP(this, &FLGUIPrefabEditor::DistributeSelectedUIItems, true), CanDistribute);
+	ToolkitCommands->MapAction(PrefabEditorCommands.DistributeVertical,
+		FExecuteAction::CreateSP(this, &FLGUIPrefabEditor::DistributeSelectedUIItems, false), CanDistribute);
 
 	// Standard editor shortcuts (Ctrl+C/V/X/W) via the engine's generic commands, mapped to the
 	// same implementations as the LGUI-specific Shift+Alt chords above (both keep working).

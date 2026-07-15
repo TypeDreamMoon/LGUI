@@ -93,6 +93,13 @@ public:
 	/** Delete the currently selected actors, reparenting their children (Shift+Delete). */
 	void DeleteSelectedActors_KeepChildren();
 
+	/** UMG-designer-style layout commands operating on the selected UI elements (world space, UI plane = world Y/Z). */
+	enum class EAlignType : uint8 { Left, HCenter, Right, Top, VMiddle, Bottom };
+	void AlignSelectedUIItems(EAlignType InType);
+	void DistributeSelectedUIItems(bool bHorizontal);
+	/** Selected UUIItem roots in this editor's world (root agent excluded). */
+	TArray<class UUIItem*> GetSelectedUIItems()const;
+
 	static FLGUIPrefabEditor* GetEditorForPrefabIfValid(ULGUIPrefab* InPrefab);
 	static ULGUIPrefabHelperObject* GetEditorPrefabHelperObjectForActor(AActor* InActor);
 	static bool WorldIsPrefabEditor(UWorld* InWorld);
