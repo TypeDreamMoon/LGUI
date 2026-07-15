@@ -380,21 +380,10 @@ void FLGUIEditorModule::StartupModule()
 	}
 	//register setting
 	{
+		// ULGUISettings / ULGUIEditorSettings / ULGUIPrefabSettings are UDeveloperSettings now and
+		// auto-register under Project Settings > Plugins (editor settings live per-user).
 		if (ISettingsModule* SettingsModule = FModuleManager::GetModulePtr<ISettingsModule>("Settings"))
 		{
-			SettingsModule->RegisterSettings("Project", "Plugins", "LGUI",
-				LOCTEXT("LGUISettingsName", "LGUI"),
-				LOCTEXT("LGUISettingsDescription", "LGUI Settings"),
-				GetMutableDefault<ULGUISettings>());
-			SettingsModule->RegisterSettings("Project", "Plugins", "LGUI Editor",
-				LOCTEXT("LGUIEditorSettingsName", "LGUI Editor"),
-				LOCTEXT("LGUIEditorSettingsDescription", "LGUI Editor Settings"),
-				GetMutableDefault<ULGUIEditorSettings>());
-			SettingsModule->RegisterSettings("Project", "Plugins", "LGUIPrefab",
-				LOCTEXT("LGUIPrefabSettingsName", "LGUIPrefab"),
-				LOCTEXT("LGUIPrefabSettingsDescription", "LGUIPrefab Settings"),
-				GetMutableDefault<ULGUIPrefabSettings>());
-
 			LGUIPrefabSequencerSettings = USequencerSettingsContainer::GetOrCreate<ULGUIPrefabSequencerSettings>(TEXT("EmbeddedLGUIPrefabSequenceEditor"));
 			SettingsModule->RegisterSettings("Editor", "ContentEditors", "EmbeddedLGUIPrefabSequenceEditor",
 				LOCTEXT("LGUIPrefabSequencerSettingsName", "LGUI Prefab Sequence Editor"),
@@ -576,12 +565,10 @@ void FLGUIEditorModule::ShutdownModule()
 
 	//unregister setting
 	{
+		// the three LGUI settings classes are UDeveloperSettings now (auto register/unregister)
 		if (ISettingsModule* SettingsModule = FModuleManager::GetModulePtr<ISettingsModule>("Settings"))
 		{
-			SettingsModule->UnregisterSettings("Project", "Plugins", "LGUI");
-			SettingsModule->UnregisterSettings("Project", "Plugins", "LGUI Editor");
-			SettingsModule->UnregisterSettings("Project", "Plugins", "LGUI Prefab");
-			SettingsModule->UnregisterSettings("Project", "Plugins", "LGUIPrefabSequencerSettings");
+			SettingsModule->UnregisterSettings("Editor", "ContentEditors", "EmbeddedLGUIPrefabSequenceEditor");
 		}
 	}
 

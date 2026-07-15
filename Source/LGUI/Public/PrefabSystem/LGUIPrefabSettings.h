@@ -3,14 +3,16 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Engine/DeveloperSettings.h"
 #include "LGUIPrefabSettings.generated.h"
 
 /** for LGUIPrefab config */
-UCLASS(config=Engine, defaultconfig)
-class LGUI_API ULGUIPrefabSettings :public UObject
+UCLASS(config=Engine, defaultconfig, meta=(DisplayName="LGUI Prefab"))
+class LGUI_API ULGUIPrefabSettings :public UDeveloperSettings
 {
 	GENERATED_BODY()
 public:
+	virtual FName GetCategoryName()const override { return TEXT("Plugins"); }
 	/**
 	 * For load prefab debug, display a log that shows how much time a LoadPrefab cost.
 	 */

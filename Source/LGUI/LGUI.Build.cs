@@ -36,6 +36,7 @@ public class LGUI : ModuleRules
                 "MovieScene",
                 "MovieSceneTracks",
                 "UMG",
+                "DeveloperSettings",//ULGUISettings/ULGUIEditorSettings/ULGUIPrefabSettings auto-register in Project Settings
 				// ... add other public dependencies that you statically link with here ...
             }
             );

@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "Engine/DataAsset.h"
 #include "Engine/Texture.h"
+#include "Engine/DeveloperSettings.h"
 #include "SceneUtils.h"
 #include "LGUISettings.generated.h"
 
@@ -63,10 +64,12 @@ public:
 };
 
 /** for LGUI config */
-UCLASS(config=Engine, defaultconfig)
-class LGUI_API ULGUISettings :public UObject
+UCLASS(config=Engine, defaultconfig, meta=(DisplayName="LGUI"))
+class LGUI_API ULGUISettings :public UDeveloperSettings
 {
 	GENERATED_BODY()
+public:
+	virtual FName GetCategoryName()const override { return TEXT("Plugins"); }
 public:
 	/** default atlas setting */
 	UPROPERTY(EditAnywhere, config, Category = Sprite)
@@ -140,12 +143,17 @@ private:
 	static const FLGUIAtlasSettings& GetAtlasSettings(const FName& InPackingTag);
 };
 
-//@todo:save config in editor
-UCLASS(config=Editor, defaultconfig)
-class LGUI_API ULGUIEditorSettings : public UObject
+/**
+ * Personal editor preferences (helper frame, anchor tool, hierarchy state...).
+ * Stored per user (EditorPerProjectUserSettings) so toggling a viewport helper
+ * no longer dirties the project's shared DefaultEditor.ini.
+ */
+UCLASS(config=EditorPerProjectUserSettings, meta=(DisplayName="LGUI Editor"))
+class LGUI_API ULGUIEditorSettings : public UDeveloperSettings
 {
 	GENERATED_BODY()
 public:
+	virtual FName GetCategoryName()const override { return TEXT("Plugins"); }
 #if WITH_EDITOR
 	virtual void PostEditChangeProperty(struct FPropertyChangedEvent& PropertyChangedEvent)override;
 	virtual void PostEditChangeChainProperty(struct FPropertyChangedChainEvent& PropertyChangedEvent)override;
