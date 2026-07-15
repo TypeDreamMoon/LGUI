@@ -42,7 +42,7 @@ public:
 /**
  * Layout child elements side by side horizontally
  */
-UCLASS( ClassGroup=(LGUI), meta=(BlueprintSpawnableComponent) )
+UCLASS( ClassGroup=(LGUI), meta=(BlueprintSpawnableComponent, DisplayName = "Flexible Grid Layout") )
 class LGUI_API UUIPanelLayout_FlexibleGrid : public UUIPanelLayoutBase
 {
 	GENERATED_BODY()
@@ -76,7 +76,7 @@ protected:
 	virtual void OnUIChildDimensionsChanged(UUIItem* child, bool horizontalPositionChanged, bool verticalPositionChanged, bool widthChanged, bool heightChanged)override;
 };
 
-UCLASS(ClassGroup = LGUI, Blueprintable)
+UCLASS(ClassGroup = LGUI, Blueprintable, meta = (DisplayName = "Flexible Grid Slot"))
 class LGUI_API UUIPanelLayout_FlexibleGrid_Slot : public UUIPanelLayoutSlotBase
 {
 	GENERATED_BODY()

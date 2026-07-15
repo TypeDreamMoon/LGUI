@@ -9,7 +9,7 @@
 /**
  * Control this UI's size by biggest size of it's children
  */
-UCLASS( ClassGroup=(LGUI), meta=(BlueprintSpawnableComponent) )
+UCLASS( ClassGroup=(LGUI), meta=(BlueprintSpawnableComponent, DisplayName = "Size Control by Children") )
 class LGUI_API UUISizeControlByChildren : public UUILayoutWithChildren
 {
 	GENERATED_BODY()

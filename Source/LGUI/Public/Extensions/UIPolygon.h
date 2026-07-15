@@ -77,7 +77,7 @@ public:
 /**
  * render a solid polygon shape
  */
-UCLASS(ClassGroup = LGUI)
+UCLASS(ClassGroup = LGUI, meta = (DisplayName = "UI Polygon"))
 class LGUI_API AUIPolygonActor : public AUIBaseRenderableActor
 {
 	GENERATED_BODY()

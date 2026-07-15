@@ -1763,6 +1763,13 @@ FReply FLGUIPrefabEditor::HandleAssetsDropOnParentActor(const TArray<FAssetData>
 							{
 								FActorLabelUtilities::SetActorLabelUnique(Actor, InCreatedActorLabel.ToString());
 							}
+							else if (ActorClass->IsNative())
+							{
+								// palette element drops read nicer with the class DisplayName
+								// ("UI Container", not "UIContainerActor_0"); blueprint classes
+								// keep the engine default (their asset name)
+								FActorLabelUtilities::SetActorLabelUnique(Actor, ActorClass->GetDisplayNameText().ToString());
+							}
 							CreatedActorArray.Add(Actor);
 							ClassCreatedActors.Add(Actor);
 						}

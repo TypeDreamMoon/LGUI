@@ -345,7 +345,10 @@ void SLGUIPrefabPalette::CollectElementGroups(TArray<FItemPtr>& OutGroupHeaders,
 		{
 			FString ShortName = Class->GetName();
 			ShortName.RemoveFromEnd(TEXT("Actor"));
-			if (bFilterActive && !SearchFilter.TestTextFilter(FBasicStringFilterExpressionContext(ShortName)))
+			// rows render the class DisplayName, so the search must match it too
+			if (bFilterActive
+				&& !SearchFilter.TestTextFilter(FBasicStringFilterExpressionContext(ShortName))
+				&& !SearchFilter.TestTextFilter(FBasicStringFilterExpressionContext(Class->GetDisplayNameText().ToString())))
 			{
 				continue;
 			}
@@ -705,10 +708,15 @@ TSharedRef<ITableRow> SLGUIPrefabPalette::OnGenerateRow(FItemPtr InItem, const T
 	if (InItem->IsComponentClass())
 	{
 		UClass* Class = InItem->ComponentClass.Get();
+		// this branch renders both component classes (Components tab) and UI element ACTOR
+		// classes (Elements tab Basic/Extensions/Post Process) -- word the hint accordingly
+		const bool bIsActorClass = Class->IsChildOf(AActor::StaticClass());
 		return SNew(STableRow<FItemPtr>, OwnerTable)
 			.Padding(FMargin(2, 2))
 			.OnDragDetected(FOnDragDetected::CreateSP(this, &SLGUIPrefabPalette::OnItemDragDetected, InItem))
-			.ToolTipText(FText::Format(LOCTEXT("ComponentRowTooltip", "{0}\nDrag onto an actor (viewport or outliner row) to add this component. Double-click adds it to the selected actor.")
+			.ToolTipText(FText::Format(bIsActorClass
+				? LOCTEXT("ElementRowTooltip", "{0}\nDrag into the viewport or onto an outliner row to create this element there. Double-click creates it under the selected actor.")
+				: LOCTEXT("ComponentRowTooltip", "{0}\nDrag onto an actor (viewport or outliner row) to add this component. Double-click adds it to the selected actor.")
 				, FText::FromString(Class->GetClassPathName().ToString())))
 			[
 				SNew(SHorizontalBox)

@@ -6,7 +6,7 @@
 #include "Core/ActorComponent/UIProceduralRect.h"
 #include "UIProceduralRectActor.generated.h"
 
-UCLASS(ClassGroup = LGUI)
+UCLASS(ClassGroup = LGUI, meta = (DisplayName = "UI Procedural Rect"))
 class LGUI_API AUIProceduralRectActor : public AUIBaseRenderableActor
 {
 	GENERATED_BODY()

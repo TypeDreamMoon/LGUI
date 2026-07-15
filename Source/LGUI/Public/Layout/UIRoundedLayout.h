@@ -9,7 +9,7 @@
 /**
  * Rounded layout, only affect children's position and angle, not affect size
  */
-UCLASS( ClassGroup=(LGUI), meta=(BlueprintSpawnableComponent) )
+UCLASS( ClassGroup=(LGUI), meta=(BlueprintSpawnableComponent, DisplayName = "Rounded Layout") )
 class LGUI_API UUIRoundedLayout : public UUILayoutWithChildren
 {
 	GENERATED_BODY()

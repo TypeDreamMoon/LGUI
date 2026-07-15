@@ -188,7 +188,7 @@ public:
 		void SetReplaceMaterial(UMaterialInterface* value);
 };
 
-UCLASS(ClassGroup = LGUI)
+UCLASS(ClassGroup = LGUI, meta = (DisplayName = "UI Static Mesh"))
 class LGUI_API AUIStaticMeshActor : public AUIBaseRenderableActor
 {
 	GENERATED_BODY()

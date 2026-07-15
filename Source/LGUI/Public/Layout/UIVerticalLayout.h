@@ -10,7 +10,7 @@
 /**
  * Layout child elements side by side vertically
  */
-UCLASS( ClassGroup=(LGUI), meta=(BlueprintSpawnableComponent) )
+UCLASS( ClassGroup=(LGUI), meta=(BlueprintSpawnableComponent, DisplayName = "Vertical Layout") )
 class LGUI_API UUIVerticalLayout : public UUILayoutWithChildren
 {
 	GENERATED_BODY()

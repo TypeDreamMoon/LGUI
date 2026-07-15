@@ -10,7 +10,7 @@
 /**
  * Layout child elements side by side horizontally
  */
-UCLASS( ClassGroup=(LGUI), meta=(BlueprintSpawnableComponent) )
+UCLASS( ClassGroup=(LGUI), meta=(BlueprintSpawnableComponent, DisplayName = "Horizontal Box Layout") )
 class LGUI_API UUIPanelLayout_HorizontalBox : public UUIPanelLayoutWithOverrideOrder
 {
 	GENERATED_BODY()
@@ -52,7 +52,7 @@ protected:
 	virtual void OnUIChildDimensionsChanged(UUIItem* child, bool horizontalPositionChanged, bool verticalPositionChanged, bool widthChanged, bool heightChanged)override;
 };
 
-UCLASS(ClassGroup = LGUI, Blueprintable)
+UCLASS(ClassGroup = LGUI, Blueprintable, meta = (DisplayName = "Horizontal Box Slot"))
 class LGUI_API UUIPanelLayout_HorizontalBox_Slot : public UUIPanelLayoutSlotWithOverrideOrder
 {
 	GENERATED_BODY()

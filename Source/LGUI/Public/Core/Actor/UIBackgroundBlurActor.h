@@ -11,7 +11,7 @@
  * Use it in ScreenSpace or WorldSpace-LGUIRenderer.
  * If android OpenGL ES3.1, need to enable "ProjectSettings/Platforms/Android/Build/Support Backbuffer Sampling on OpenGL".
  */
-UCLASS(ClassGroup = LGUI)
+UCLASS(ClassGroup = LGUI, meta = (DisplayName = "UI Background Blur"))
 class LGUI_API AUIBackgroundBlurActor : public AUIBasePostProcessActor
 {
 	GENERATED_BODY()

@@ -74,7 +74,7 @@ public:
 /**
  * render a polygon line shape
  */
-UCLASS(ClassGroup = LGUI)
+UCLASS(ClassGroup = LGUI, meta = (DisplayName = "UI Polygon Line"))
 class LGUI_API AUIPolygonLineActor : public AUIBaseRenderableActor
 {
 	GENERATED_BODY()

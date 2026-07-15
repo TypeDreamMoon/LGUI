@@ -56,7 +56,7 @@ public:
 };
 
 
-UCLASS(ClassGroup = LGUI)
+UCLASS(ClassGroup = LGUI, meta = (DisplayName = "UI Ring"))
 class LGUI_API AUIRingActor : public AUIBaseRenderableActor
 {
 	GENERATED_BODY()
