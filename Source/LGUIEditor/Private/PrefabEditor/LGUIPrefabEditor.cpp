@@ -75,15 +75,91 @@ FLGUIPrefabEditor::FLGUIPrefabEditor()
 }
 FLGUIPrefabEditor::~FLGUIPrefabEditor()
 {
+	GEditor->UnregisterForUndo(this);
+
 	PrefabHelperObject->ConditionalBeginDestroy();
 	PrefabHelperObject = nullptr;
 
 	LGUIPrefabEditorInstanceCollection.Remove(this);
 
-	GEditor->SelectNone(true, true);
+	// deselect only actors belonging to this prefab's world -- a plain SelectNone here used to
+	// clobber the level editor's (and other prefab editors') selection on every window close
+	{
+		TArray<AActor*> ActorsToDeselect;
+		for (FSelectionIterator It(GEditor->GetSelectedActorIterator()); It; ++It)
+		{
+			if (AActor* Actor = Cast<AActor>(*It))
+			{
+				if (Actor->GetWorld() == PreviewScene.GetWorld())
+				{
+					ActorsToDeselect.Add(Actor);
+				}
+			}
+		}
+		if (ActorsToDeselect.Num() > 0)
+		{
+			for (auto& Actor : ActorsToDeselect)
+			{
+				GEditor->SelectActor(Actor, false, false);
+			}
+			GEditor->NoteSelectionChange();
+		}
+	}
 
 	ULGUIPrefabManagerObject::MarkBroadcastLevelActorListChanged();
 	FLGUIEditorModule::Get().GetNativeSceneOutlinerExtension()->Restore();
+}
+
+bool FLGUIPrefabEditor::MatchesContext(const FTransactionContext& InContext, const TArray<TPair<UObject*, FTransactionObjectEvent>>& TransactionObjectContexts) const
+{
+	// only react to transactions that touch this editor's world or its prefab bookkeeping --
+	// otherwise every unrelated level-editor undo would dirty this prefab
+	const UWorld* PrefabWorld = PreviewScene.GetWorld();
+	for (auto& Pair : TransactionObjectContexts)
+	{
+		if (UObject* Object = Pair.Key)
+		{
+			if (Object == PrefabHelperObject || Object == PrefabBeingEdited)
+			{
+				return true;
+			}
+			if (Object->GetTypedOuter<UWorld>() == PrefabWorld)
+			{
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
+void FLGUIPrefabEditor::PostUndo(bool bSuccess)
+{
+	if (bSuccess)
+	{
+		HandleUndoRedo();
+	}
+}
+
+void FLGUIPrefabEditor::PostRedo(bool bSuccess)
+{
+	if (bSuccess)
+	{
+		HandleUndoRedo();
+	}
+}
+
+void FLGUIPrefabEditor::HandleUndoRedo()
+{
+	// conservative dirty policy: any undo/redo that touched this prefab marks it dirty.
+	// An unnecessary re-Apply is harmless; a missed one silently loses the undone state
+	// (the classic trap: edit -> Apply -> Ctrl+Z left the flag "clean" while the scene
+	// no longer matched the asset).
+	PrefabHelperObject->SetAnythingDirty();
+	PrefabHelperObject->CleanupInvalidSubPrefab();
+	if (OutlinerPtr.IsValid())
+	{
+		OutlinerPtr->FullRefresh();
+	}
 }
 
 FLGUIPrefabEditor* FLGUIPrefabEditor::GetEditorForPrefabIfValid(ULGUIPrefab* InPrefab)
@@ -270,15 +346,25 @@ bool FLGUIPrefabEditor::OnRequestClose()
 {
 	if (GetAnythingDirty())
 	{
-		auto WarningMsg = LOCTEXT("LoseDataOnCloseEditor", "Are you sure you want to close prefab editor window? Property will lose if not hit Apply!");
-		auto Result = FMessageDialog::Open(EAppMsgType::YesNo, WarningMsg);
-		if (Result == EAppReturnType::Yes)
+		// three-way close, like other UE asset editors: save, discard, or stay open.
+		// The old dialog only offered discard/cancel -- there was no way to "apply and close".
+		auto WarningMsg = LOCTEXT("LoseDataOnCloseEditor", "This prefab has unapplied changes.\n\nYes: Apply changes and close\nNo: Discard changes and close\nCancel: Keep editing");
+		auto Result = FMessageDialog::Open(EAppMsgType::YesNoCancel, WarningMsg);
+		switch (Result)
+		{
+		case EAppReturnType::Yes:
+		{
+			OnApply();
+			return true;
+		}
+		case EAppReturnType::No:
 		{
 			return true;
 		}
-		else
+		default:
 		{
 			return false;
+		}
 		}
 	}
 	return true;
@@ -384,6 +470,7 @@ void FLGUIPrefabEditor::InitPrefabEditor(const EToolkitMode::Type Mode, const TS
 
 	BindCommands();
 	ExtendToolbar();
+	GEditor->RegisterForUndo(this);
 
 	// Default layout
 	const TSharedRef<FTabManager::FLayout> StandaloneDefaultLayout = FTabManager::NewLayout("Standalone_LGUIPrefabEditor_Layout_v3")

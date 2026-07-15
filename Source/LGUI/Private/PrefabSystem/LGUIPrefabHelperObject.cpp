@@ -686,6 +686,10 @@ void ULGUIPrefabHelperObject::TryCollectPropertyToOverride(UObject* InObject, FP
 			auto Property = FindFProperty<FProperty>(InObject->GetClass(), PropertyName);
 			if (Property != nullptr)
 			{
+				// record the override inside the active transaction, so undoing the property
+				// edit also removes the override entry -- otherwise the entry survives the undo
+				// and the property silently stops receiving sub-prefab updates
+				this->Modify();
 				SetAnythingDirty();
 				AddMemberPropertyToSubPrefab(PropertyActorInSubPrefab, InObject, PropertyName);
 				ULGUIPrefabManagerObject::OnPrefabEditor_AfterCollectPropertyToOverride.ExecuteIfBound(this, InObject, PropertyName);
@@ -1775,6 +1779,10 @@ void ULGUIPrefabHelperObject::RefreshSubPrefabVersion(AActor* InSubPrefabRootAct
 
 void ULGUIPrefabHelperObject::MakePrefabAsSubPrefab(ULGUIPrefab* InPrefab, AActor* InActor, const TMap<FGuid, TObjectPtr<UObject>>& InSubMapGuidToObject, const TArray<FLGUIPrefabOverrideParameterData>& InObjectOverrideParameterArray)
 {
+	// SubPrefabMap/MapGuidToObject changes must be transacted, or undoing a paste/drop
+	// leaves dangling sub-prefab entries behind
+	this->Modify();
+
 	FLGUISubPrefabData SubPrefabData;
 	SubPrefabData.PrefabAsset = InPrefab;
 	SubPrefabData.OverallVersionMD5 = InPrefab->GenerateOverallVersionMD5();
@@ -1812,6 +1820,9 @@ void ULGUIPrefabHelperObject::MakePrefabAsSubPrefab(ULGUIPrefab* InPrefab, AActo
 
 void ULGUIPrefabHelperObject::RemoveSubPrefabByRootActor(AActor* InPrefabRootActor)
 {
+	// see MakePrefabAsSubPrefab: structural bookkeeping must participate in the transaction
+	this->Modify();
+
 	if (SubPrefabMap.Contains(InPrefabRootActor))
 	{
 		auto SubPrefabData = SubPrefabMap[InPrefabRootActor];

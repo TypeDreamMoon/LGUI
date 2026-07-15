@@ -4,6 +4,7 @@
 #include "UObject/GCObject.h"
 #include "Toolkits/IToolkitHost.h"
 #include "Toolkits/AssetEditorToolkit.h"
+#include "EditorUndoClient.h"
 #include "LGUIPrefabEditorScene.h"
 #pragma once
 
@@ -25,10 +26,19 @@ struct FLGUISubPrefabData;
  */
 class FLGUIPrefabEditor : public FAssetEditorToolkit
 	, public FGCObject
+	, public FEditorUndoClient
 {
 public:
 	FLGUIPrefabEditor();
 	~FLGUIPrefabEditor();
+
+	// FEditorUndoClient interface: keep the editor consistent after global undo/redo.
+	// Without this, undoing after Apply leaves the scene rolled back while the dirty flag
+	// still says "clean", so closing the window silently loses the undone state.
+	virtual bool MatchesContext(const FTransactionContext& InContext, const TArray<TPair<UObject*, FTransactionObjectEvent>>& TransactionObjectContexts) const override;
+	virtual void PostUndo(bool bSuccess) override;
+	virtual void PostRedo(bool bSuccess) override;
+	// End FEditorUndoClient interface
 
 	// IToolkit interface
 	virtual void RegisterTabSpawners(const TSharedRef<class FTabManager>& TabManager) override;
@@ -140,4 +150,5 @@ private:
 	bool IsFilteredActor(const AActor* Actor);
 	void OnOutlinerPickedChanged(AActor* Actor);
 	void OnOutlinerActorDoubleClick(AActor* Actor);
+	void HandleUndoRedo();
 };
