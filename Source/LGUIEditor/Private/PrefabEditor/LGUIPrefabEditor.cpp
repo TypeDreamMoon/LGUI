@@ -1594,18 +1594,25 @@ FReply FLGUIPrefabEditor::TryHandleAssetDragDropOperation(const FDragDropEvent& 
 	TSharedPtr<FDragDropOperation> Operation = DragDropEvent.GetOperation();
 	if (Operation.IsValid() && Operation->IsOfType<FAssetDragDropOp>())
 	{
+		// element template drags (palette "Panels"/"Layouts" rows) carry a display name
+		// used to label the created actor, UMG-style ("HorizontalBox" not "UIContainerActor")
+		FText CreatedActorLabel;
+		if (Operation->IsOfType<FLGUIElementTemplateDragDropOp>())
+		{
+			CreatedActorLabel = StaticCastSharedPtr<FLGUIElementTemplateDragDropOp>(Operation)->TemplateDisplayName;
+		}
 		TArray< FAssetData > DroppedAssetData = AssetUtil::ExtractAssetDataFromDrag(Operation);
 		if (DroppedAssetData.Num() > 0)
 		{
 			// viewport drop has no row target -- parent under the currently selected actor
-			return HandleAssetsDropOnParentActor(DroppedAssetData, CurrentSelectedActor.Get());
+			return HandleAssetsDropOnParentActor(DroppedAssetData, CurrentSelectedActor.Get(), CreatedActorLabel);
 		}
 		return FReply::Handled();
 	}
 	return FReply::Unhandled();
 }
 
-FReply FLGUIPrefabEditor::HandleAssetsDropOnParentActor(const TArray<FAssetData>& DroppedAssetData, AActor* InParentActor)
+FReply FLGUIPrefabEditor::HandleAssetsDropOnParentActor(const TArray<FAssetData>& DroppedAssetData, AActor* InParentActor, const FText& InCreatedActorLabel)
 {
 	const int32 NumAssets = DroppedAssetData.Num();
 	{
@@ -1740,6 +1747,9 @@ FReply FLGUIPrefabEditor::HandleAssetsDropOnParentActor(const TArray<FAssetData>
 						}, 1);//delay execute, because the outliner not create actor yet
 				}
 			}
+			// actors spawned from classes in THIS drop: element-template components attach to
+			// these (not to the parent), and the template label applies to them
+			TArray<AActor*> ClassCreatedActors;
 			if (PotentialActorClassesToLoad.Num() > 0)
 			{
 				for (auto& ActorClass : PotentialActorClassesToLoad)
@@ -1749,7 +1759,12 @@ FReply FLGUIPrefabEditor::HandleAssetsDropOnParentActor(const TArray<FAssetData>
 						if (auto RootComp = Actor->GetRootComponent())
 						{
 							RootComp->AttachToComponent(InParentActor->GetRootComponent(), FAttachmentTransformRules::KeepWorldTransform);
+							if (!InCreatedActorLabel.IsEmpty())
+							{
+								FActorLabelUtilities::SetActorLabelUnique(Actor, InCreatedActorLabel.ToString());
+							}
 							CreatedActorArray.Add(Actor);
+							ClassCreatedActors.Add(Actor);
 						}
 						else
 						{
@@ -1773,15 +1788,26 @@ FReply FLGUIPrefabEditor::HandleAssetsDropOnParentActor(const TArray<FAssetData>
 			UActorComponent* LastCreatedComponent = nullptr;
 			if (PotentialComponentClassesToLoad.Num() > 0)
 			{
-				InParentActor->Modify();
-				for (auto& ComponentClass : PotentialComponentClassesToLoad)
+				// element templates drop an actor class together with its components -- those
+				// components belong on the freshly spawned actor(s). A pure component drop
+				// (no actor class in the payload) still targets the parent/row actor.
+				TArray<AActor*> ComponentTargetActors = ClassCreatedActors;
+				if (ComponentTargetActors.Num() == 0)
 				{
-					// same recipe as LGUIEditorTools::AttachComponentToSelectedActor
-					auto Component = NewObject<UActorComponent>(InParentActor, ComponentClass
-						, *FComponentEditorUtils::GenerateValidVariableName(ComponentClass, InParentActor), RF_Transactional);
-					InParentActor->AddInstanceComponent(Component);
-					Component->RegisterComponent();
-					LastCreatedComponent = Component;
+					ComponentTargetActors.Add(InParentActor);
+				}
+				for (AActor* ComponentTargetActor : ComponentTargetActors)
+				{
+					ComponentTargetActor->Modify();
+					for (auto& ComponentClass : PotentialComponentClassesToLoad)
+					{
+						// same recipe as LGUIEditorTools::AttachComponentToSelectedActor
+						auto Component = NewObject<UActorComponent>(ComponentTargetActor, ComponentClass
+							, *FComponentEditorUtils::GenerateValidVariableName(ComponentClass, ComponentTargetActor), RF_Transactional);
+						ComponentTargetActor->AddInstanceComponent(Component);
+						Component->RegisterComponent();
+						LastCreatedComponent = Component;
+					}
 				}
 			}
 			if (CreatedActorArray.Num() > 0)
