@@ -22,6 +22,7 @@
 #include "Layout/UIPanelLayout_VerticalBox.h"
 #include "Layout/UIPanelLayout_UniformGrid.h"
 #include "Layout/UIPanelLayout_FlexibleGrid.h"
+#include "Layout/UIPanelLayout_Overlay.h"
 #include "Layout/UIHorizontalLayout.h"
 #include "Layout/UIVerticalLayout.h"
 #include "Layout/UIGridLayout.h"
@@ -424,6 +425,9 @@ void SLGUIPrefabPalette::CollectElementGroups(TArray<FItemPtr>& OutGroupHeaders,
 			{ LOCTEXT("Tpl_FlexibleGrid", "Flexible Grid")
 			, LOCTEXT("Tpl_FlexibleGrid_Tooltip", "UIContainer + Panel Layout Flexible Grid.\nArranges children in a grid with individual row/column ratios -- LGUI's counterpart of UMG's Grid Panel.")
 			, AUIContainerActor::StaticClass(), { UUIPanelLayout_FlexibleGrid::StaticClass() } },
+			{ LOCTEXT("Tpl_Overlay", "Overlay")
+			, LOCTEXT("Tpl_Overlay_Tooltip", "UIContainer + Overlay Layout.\nStacks children on top of each other in the same rect; each child's slot controls padding and alignment (Fill stretches it) -- LGUI's counterpart of UMG's Overlay.")
+			, AUIContainerActor::StaticClass(), { UUIPanelLayout_Overlay::StaticClass() } },
 			{ LOCTEXT("Tpl_Canvas", "Canvas")
 			, LOCTEXT("Tpl_Canvas_Tooltip", "UIContainer + LGUICanvas (sub canvas).\nIts subtree renders as its own batch with its own sort order -- use it to isolate frequently-changing UI or to control render order, similar to dropping a Canvas Panel in UMG.")
 			, AUIContainerActor::StaticClass(), { ULGUICanvas::StaticClass() } },
