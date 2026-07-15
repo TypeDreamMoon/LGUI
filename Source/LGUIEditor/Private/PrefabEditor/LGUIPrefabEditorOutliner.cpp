@@ -24,6 +24,10 @@
 #include "Framework/Commands/GenericCommands.h"
 #include "Framework/MultiBox/MultiBoxBuilder.h"
 #include "Editor.h"
+#include "Core/Actor/UIContainerActor.h"
+#include "Core/Actor/UISpriteActor.h"
+#include "Core/Actor/UIProceduralRectActor.h"
+#include "Core/Actor/UITextureActor.h"
 
 #define LOCTEXT_NAMESPACE "LGUIPrefabEditorOutliner"
 
@@ -134,6 +138,40 @@ public:
 			MenuBuilder.AddMenuEntry(FGenericCommands::Get().Copy);
 			MenuBuilder.AddMenuEntry(FGenericCommands::Get().Paste);
 			MenuBuilder.AddMenuEntry(FGenericCommands::Get().Duplicate);
+		}
+		MenuBuilder.EndSection();
+		MenuBuilder.BeginSection("LGUIPrefabOutlinerWrap", LOCTEXT("OutlinerWrapSection", "Hierarchy"));
+		{
+			// UMG-style Wrap With: new parent container sized to the selection, selection reparented into it
+			MenuBuilder.AddSubMenu(
+				LOCTEXT("WrapWithSubMenu", "Wrap With..."),
+				LOCTEXT("WrapWithSubMenuTooltip", "Create a new UI element sized to the selection and move the selected elements into it"),
+				FNewMenuDelegate::CreateLambda([WeakEditor = PrefabEditorPtr](FMenuBuilder& SubMenu)
+					{
+						UClass* WrapperClasses[] =
+						{
+							AUIContainerActor::StaticClass(),
+							AUISpriteActor::StaticClass(),
+							AUIProceduralRectActor::StaticClass(),
+							AUITextureActor::StaticClass(),
+						};
+						for (UClass* WrapperClass : WrapperClasses)
+						{
+							FString ShortName = WrapperClass->GetName();
+							ShortName.RemoveFromEnd(TEXT("Actor"));
+							SubMenu.AddMenuEntry(
+								FText::FromString(ShortName),
+								WrapperClass->GetToolTipText(),
+								FSlateIcon(),
+								FUIAction(FExecuteAction::CreateLambda([WeakEditor, WrapperClass]()
+									{
+										if (auto Editor = WeakEditor.Pin())
+										{
+											Editor->WrapSelectedUIItems(WrapperClass);
+										}
+									})));
+						}
+					}));
 		}
 		MenuBuilder.EndSection();
 		MenuBuilder.BeginSection("LGUIPrefabOutlinerAlign", LOCTEXT("OutlinerAlignSection", "Align"));

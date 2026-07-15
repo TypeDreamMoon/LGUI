@@ -101,6 +101,14 @@ public:
 	TArray<class UUIItem*> GetSelectedUIItems()const;
 
 	/**
+	 * UMG-style "Wrap With": spawn a new UI actor of the given class, size/position it to the
+	 * union rect of the selected elements, insert it at their hierarchy position and reparent
+	 * them into it (world transforms kept). Selection must share a parent; sub prefab internals
+	 * and the prefab root cannot be wrapped.
+	 */
+	void WrapSelectedUIItems(TSubclassOf<AActor> WrapperClass);
+
+	/**
 	 * Scan every FLGUIEventDelegate on the live actor tree and warn (notification) about bindings
 	 * whose target no longer resolves (renamed component, deleted function). Bindings locate their
 	 * target by actor + component NAME + function NAME, so renames break them silently at runtime.

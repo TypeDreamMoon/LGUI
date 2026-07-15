@@ -903,6 +903,121 @@ void FLGUIPrefabEditor::DistributeSelectedUIItems(bool bHorizontal)
 	}
 }
 
+void FLGUIPrefabEditor::WrapSelectedUIItems(TSubclassOf<AActor> WrapperClass)
+{
+	using namespace LGUIPrefabEditorAlignLocal;
+	if (WrapperClass == nullptr)return;
+	auto Items = GetSelectedUIItems();
+	if (Items.Num() == 0)return;
+
+	// only top-level selected items (children of selected parents travel with them)
+	TArray<UUIItem*> TopLevelItems;
+	for (auto& Item : Items)
+	{
+		bool bParentAlsoSelected = false;
+		for (auto Parent = Item->GetParentUIItem(); Parent != nullptr; Parent = Parent->GetParentUIItem())
+		{
+			if (Items.Contains(Parent))
+			{
+				bParentAlsoSelected = true;
+				break;
+			}
+		}
+		if (!bParentAlsoSelected)
+		{
+			TopLevelItems.Add(Item);
+		}
+	}
+	if (TopLevelItems.Num() == 0)return;
+
+	// validation
+	UUIItem* CommonParent = TopLevelItems[0]->GetParentUIItem();
+	if (CommonParent == nullptr)
+	{
+		FMessageDialog::Open(EAppMsgType::Ok, LOCTEXT("Wrap_NoParent", "Cannot wrap: selected element has no UI parent."));
+		return;
+	}
+	for (auto& Item : TopLevelItems)
+	{
+		AActor* Actor = Item->GetOwner();
+		if (Item->GetParentUIItem() != CommonParent)
+		{
+			FMessageDialog::Open(EAppMsgType::Ok, LOCTEXT("Wrap_DifferentParents", "Cannot wrap: all selected elements must share the same parent."));
+			return;
+		}
+		if (Actor == PrefabHelperObject->LoadedRootActor)
+		{
+			FMessageDialog::Open(EAppMsgType::Ok, LOCTEXT("Wrap_Root", "Cannot wrap the prefab root actor."));
+			return;
+		}
+		if (PrefabHelperObject->IsActorBelongsToSubPrefab(Actor) && !PrefabHelperObject->SubPrefabMap.Contains(Actor))
+		{
+			FMessageDialog::Open(EAppMsgType::Ok, LOCTEXT("Wrap_SubPrefabInternal", "Cannot wrap an actor inside a sub prefab. Select the sub prefab's root instead."));
+			return;
+		}
+	}
+
+	FScopedTransaction Transaction(LOCTEXT("WrapUIElements_Transaction", "LGUI Wrap UI Elements"));
+
+	// union world rect of the selection on the UI plane
+	FWorldRect First = ComputeWorldRect(TopLevelItems[0]);
+	double MinY = First.MinY, MaxY = First.MaxY, MinZ = First.MinZ, MaxZ = First.MaxZ;
+	int32 MinHierarchyIndex = TopLevelItems[0]->GetHierarchyIndex();
+	for (auto& Item : TopLevelItems)
+	{
+		FWorldRect Rect = ComputeWorldRect(Item);
+		MinY = FMath::Min(MinY, Rect.MinY); MaxY = FMath::Max(MaxY, Rect.MaxY);
+		MinZ = FMath::Min(MinZ, Rect.MinZ); MaxZ = FMath::Max(MaxZ, Rect.MaxZ);
+		MinHierarchyIndex = FMath::Min(MinHierarchyIndex, Item->GetHierarchyIndex());
+	}
+
+	// spawn the wrapper and place it so it exactly covers the selection
+	AActor* WrapperActor = GetWorld()->SpawnActor<AActor>(WrapperClass);
+	auto WrapperUIItem = WrapperActor != nullptr ? Cast<UUIItem>(WrapperActor->GetRootComponent()) : nullptr;
+	if (WrapperUIItem == nullptr)
+	{
+		if (WrapperActor != nullptr)
+		{
+			WrapperActor->Destroy();
+		}
+		FMessageDialog::Open(EAppMsgType::Ok, LOCTEXT("Wrap_NotUIActor", "Wrapper class must be a UI actor (root component is UIItem)."));
+		Transaction.Cancel();
+		return;
+	}
+	FString WrapperLabel = WrapperClass->GetName();
+	WrapperLabel.RemoveFromEnd(TEXT("Actor"));
+	WrapperActor->SetActorLabel(WrapperLabel);
+
+	CommonParent->GetOwner()->Modify();
+	CommonParent->Modify();
+	WrapperUIItem->AttachToComponent(CommonParent, FAttachmentTransformRules::KeepRelativeTransform);
+	// center/size in the parent's local space (UI plane: local Y = horizontal, Z = vertical).
+	// Parent scale folds into the inverse transform; UI hierarchies are normally unrotated.
+	const FVector WorldCenter(First.Item->GetComponentLocation().X, (MinY + MaxY) * 0.5, (MinZ + MaxZ) * 0.5);
+	const FVector LocalCenter = CommonParent->GetComponentTransform().InverseTransformPosition(WorldCenter);
+	const FVector ParentScale = CommonParent->GetComponentScale();
+	WrapperUIItem->SetAnchoredPosition(FVector2D(LocalCenter.Y, LocalCenter.Z));
+	WrapperUIItem->SetWidth(ParentScale.Y != 0 ? (MaxY - MinY) / ParentScale.Y : (MaxY - MinY));
+	WrapperUIItem->SetHeight(ParentScale.Z != 0 ? (MaxZ - MinZ) / ParentScale.Z : (MaxZ - MinZ));
+	WrapperUIItem->SetHierarchyIndex(MinHierarchyIndex);
+
+	// move the selection into the wrapper, keeping world transforms
+	for (auto& Item : TopLevelItems)
+	{
+		Item->GetOwner()->Modify();
+		Item->Modify();
+		Item->AttachToComponent(WrapperUIItem, FAttachmentTransformRules::KeepWorldTransform);
+	}
+
+	PrefabHelperObject->SetAnythingDirty();
+	GEditor->SelectNone(true, true);
+	GEditor->SelectActor(WrapperActor, true, true, false, true);
+	if (OutlinerPtr.IsValid())
+	{
+		OutlinerPtr->FullRefresh();
+	}
+}
+
 void FLGUIPrefabEditor::ValidateEventBindings()
 {
 	// FLGUIEventDelegateData's fields are private; read them via UPROPERTY reflection.
