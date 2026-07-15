@@ -13,14 +13,23 @@ class FLGUIPrefabEditor;
 class FAssetThumbnailPool;
 class ULGUIPrefab;
 
+/** Palette tab groups, UMG-style: element types, behaviour components, prefab assets. */
+enum class ELGUIPaletteTab : uint8
+{
+	Elements = 0,
+	Components,
+	Prefabs,
+};
+
 /**
  * One node of the palette tree: a category header (CategoryName set), a prefab asset row
- * (Asset valid), or a component class row (ComponentClass valid).
+ * (Asset valid), or a class row (ComponentClass valid -- either a behaviour/effect component
+ * class to add to an actor, or a UI element ACTOR class to spawn under it).
  */
 struct FLGUIPrefabPaletteItem
 {
 	FAssetData Asset;
-	/** LGUI behaviour/effect component class (drag onto an actor to add the component). */
+	/** Component class (added to the target actor) OR UI element actor class (spawned under it). */
 	TWeakObjectPtr<UClass> ComponentClass;
 	FString CategoryName;
 	/** True on the pinned "Favorites" header (distinguishes it from a user category literally named "Favorites"). */
@@ -89,6 +98,12 @@ private:
 	/** Favorites key: object path for assets, class path for component classes. */
 	FString GetItemFavoriteKey(FItemPtr InItem)const;
 
+	// tab groups
+	void CollectElementGroups(TArray<FItemPtr>& OutGroupHeaders, FItemPtr& InOutFavoritesHeader);
+	void CollectPrefabCategories(TArray<FItemPtr>& OutHeaders, FItemPtr& InOutFavoritesHeader);
+	void AddToFavoritesHeaderIfFavorite(const FItemPtr& InItem, FItemPtr& InOutFavoritesHeader);
+	void SetCurrentTab(ELGUIPaletteTab InTab);
+
 	// asset registry change handlers (may fire off the game thread -- only set the dirty flag)
 	void OnAssetChanged(const FAssetData& InAssetData);
 	void OnAssetRenamed(const FAssetData& InAssetData, const FString& InOldObjectPath);
@@ -109,6 +124,8 @@ private:
 	TSet<FString> FavoritePaths;
 	/** When true, prefabs marked bHideInPalette are shown (greyed out) so they can be unhidden. */
 	bool bShowHiddenPrefabs = false;
+	/** Active tab group (persisted in the editor ini). */
+	ELGUIPaletteTab CurrentTab = ELGUIPaletteTab::Elements;
 
 	std::atomic<bool> bPendingRebuild{ false };
 

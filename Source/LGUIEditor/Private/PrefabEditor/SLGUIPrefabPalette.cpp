@@ -2,12 +2,19 @@
 
 #include "SLGUIPrefabPalette.h"
 #include "LGUIPrefabEditor.h"
+#include "LGUIEditorTools.h"
 #include "PrefabSystem/LGUIPrefab.h"
 #include "Core/LGUILifeCycleBehaviour.h"
 #include "GeometryModifier/UIGeometryModifierBase.h"
 #include "Interaction/UISelectableComponent.h"
 #include "Layout/UILayoutBase.h"
 #include "Layout/UILayoutElement.h"
+#include "Core/Actor/UIContainerActor.h"
+#include "Core/Actor/UISpriteActor.h"
+#include "Core/Actor/UITextActor.h"
+#include "Core/Actor/UITextureActor.h"
+#include "Core/Actor/UIProceduralRectActor.h"
+#include "Core/Actor/UICustomMeshActor.h"
 
 #include "AssetRegistry/IAssetRegistry.h"
 #include "AssetThumbnail.h"
@@ -26,6 +33,7 @@
 #include "Widgets/Images/SImage.h"
 #include "Widgets/Input/SCheckBox.h"
 #include "Widgets/Input/SEditableTextBox.h"
+#include "Widgets/Input/SSegmentedControl.h"
 #include "Widgets/Input/SSearchBox.h"
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/Text/STextBlock.h"
@@ -51,10 +59,33 @@ void SLGUIPrefabPalette::Construct(const FArguments& InArgs, TSharedPtr<FLGUIPre
 	PrefabEditorPtr = InPrefabEditor;
 	ThumbnailPool = MakeShared<FAssetThumbnailPool>(64);//FTickableEditorObject, ticks itself
 	LoadFavorites();
+	{
+		int32 SavedTab = (int32)ELGUIPaletteTab::Elements;
+		GConfig->GetInt(LGUIPrefabPaletteLocal::FavoritesConfigSection, TEXT("CurrentTab"), SavedTab, GEditorPerProjectIni);
+		CurrentTab = (ELGUIPaletteTab)FMath::Clamp(SavedTab, 0, (int32)ELGUIPaletteTab::Prefabs);
+	}
 
 	ChildSlot
 	[
 		SNew(SVerticalBox)
+		+ SVerticalBox::Slot()
+		.AutoHeight()
+		.Padding(2, 2, 2, 2)
+		[
+			// tab groups, UMG-style
+			SNew(SSegmentedControl<ELGUIPaletteTab>)
+			.Value_Lambda([this]() { return CurrentTab; })
+			.OnValueChanged(this, &SLGUIPrefabPalette::SetCurrentTab)
+			+ SSegmentedControl<ELGUIPaletteTab>::Slot(ELGUIPaletteTab::Elements)
+			.Text(LOCTEXT("TabElements", "Elements"))
+			.ToolTip(LOCTEXT("TabElementsTooltip", "Basic UI element types and built-in controls (same as the Create UI Element menu)"))
+			+ SSegmentedControl<ELGUIPaletteTab>::Slot(ELGUIPaletteTab::Components)
+			.Text(LOCTEXT("TabComponents", "Components"))
+			.ToolTip(LOCTEXT("TabComponentsTooltip", "LGUI behaviour components: interaction, layout, effects and custom scripts"))
+			+ SSegmentedControl<ELGUIPaletteTab>::Slot(ELGUIPaletteTab::Prefabs)
+			.Text(LOCTEXT("TabPrefabs", "Prefabs"))
+			.ToolTip(LOCTEXT("TabPrefabsTooltip", "Prefab assets in this project, grouped by palette category"))
+		]
 		+ SVerticalBox::Slot()
 		.AutoHeight()
 		.Padding(2, 2, 2, 4)
@@ -167,11 +198,11 @@ void SLGUIPrefabPalette::CollectComponentClassGroups(TArray<FItemPtr>& OutGroupH
 	}
 
 	const bool bFilterActive = !SearchFilter.GetFilterText().IsEmpty();
-	// fixed group order: most used first
-	const FString GroupInteraction = TEXT("Components · Interaction");
-	const FString GroupLayout = TEXT("Components · Layout");
-	const FString GroupEffect = TEXT("Components · Effect");
-	const FString GroupBehaviour = TEXT("Components · Behaviour");
+	// fixed group order: most used first (shown inside the Components tab, so no prefix needed)
+	const FString GroupInteraction = TEXT("Interaction");
+	const FString GroupLayout = TEXT("Layout");
+	const FString GroupEffect = TEXT("Effect");
+	const FString GroupBehaviour = TEXT("Behaviour");
 	TMap<FString, FItemPtr> GroupMap;
 	auto GetGroupHeader = [&GroupMap](const FString& GroupName) -> FItemPtr&
 		{
@@ -254,11 +285,113 @@ void SLGUIPrefabPalette::CollectComponentClassGroups(TArray<FItemPtr>& OutGroupH
 	}
 }
 
-void SLGUIPrefabPalette::RebuildList()
+void SLGUIPrefabPalette::AddToFavoritesHeaderIfFavorite(const FItemPtr& InItem, FItemPtr& InOutFavoritesHeader)
 {
-	RootItems.Reset();
-	KnownCategories.Reset();
+	if (!FavoritePaths.Contains(GetItemFavoriteKey(InItem)))return;
+	if (!InOutFavoritesHeader.IsValid())
+	{
+		InOutFavoritesHeader = MakeShared<FLGUIPrefabPaletteItem>();
+		InOutFavoritesHeader->bIsFavoritesGroup = true;
+	}
+	auto FavItem = MakeShared<FLGUIPrefabPaletteItem>();
+	FavItem->Asset = InItem->Asset;
+	FavItem->ComponentClass = InItem->ComponentClass;
+	InOutFavoritesHeader->Children.Add(FavItem);
+}
 
+void SLGUIPrefabPalette::SetCurrentTab(ELGUIPaletteTab InTab)
+{
+	if (CurrentTab == InTab)return;
+	CurrentTab = InTab;
+	GConfig->SetInt(LGUIPrefabPaletteLocal::FavoritesConfigSection, TEXT("CurrentTab"), (int32)CurrentTab, GEditorPerProjectIni);
+	RequestRebuild();
+}
+
+void SLGUIPrefabPalette::CollectElementGroups(TArray<FItemPtr>& OutGroupHeaders, FItemPtr& InOutFavoritesHeader)
+{
+	const bool bFilterActive = !SearchFilter.GetFilterText().IsEmpty();
+
+	// basic UI element actor classes -- same list as the "Create UI Element" menu. Dragging them
+	// spawns the actor under the drop target (the drop path already handles actor classes).
+	{
+		UClass* BasicClasses[] =
+		{
+			AUIContainerActor::StaticClass(),
+			AUISpriteActor::StaticClass(),
+			AUITextActor::StaticClass(),
+			AUITextureActor::StaticClass(),
+			AUIProceduralRectActor::StaticClass(),
+			AUICustomMeshActor::StaticClass(),
+		};
+		FItemPtr Header;
+		for (UClass* Class : BasicClasses)
+		{
+			FString ShortName = Class->GetName();
+			ShortName.RemoveFromEnd(TEXT("Actor"));
+			if (bFilterActive && !SearchFilter.TestTextFilter(FBasicStringFilterExpressionContext(ShortName)))
+			{
+				continue;
+			}
+			if (!Header.IsValid())
+			{
+				Header = MakeShared<FLGUIPrefabPaletteItem>();
+				Header->CategoryName = TEXT("Basic");
+				Header->bIsComponentGroup = true;
+			}
+			auto Item = MakeShared<FLGUIPrefabPaletteItem>();
+			Item->ComponentClass = Class;
+			Header->Children.Add(Item);
+			AddToFavoritesHeaderIfFavorite(Item, InOutFavoritesHeader);
+		}
+		if (Header.IsValid())
+		{
+			OutGroupHeaders.Add(Header);
+		}
+	}
+
+	// built-in control prefabs (Button/Toggle/Slider/...) -- same list as the "Create UI Element"
+	// menu; they are prefab assets under /LGUI/Prefabs/, so the whole prefab drag/drop path applies
+	{
+		static const TCHAR* ControlNames[] =
+		{
+			TEXT("Button"), TEXT("Toggle"), TEXT("ToggleGroup"),
+			TEXT("HorizontalSlider"), TEXT("VerticalSlider"),
+			TEXT("HorizontalScrollbar"), TEXT("VerticalScrollbar"),
+			TEXT("Dropdown"), TEXT("TextInput"), TEXT("TextInputMultiline"),
+			TEXT("HorizontalScrollView"), TEXT("VerticalScrollView"),
+			TEXT("HorizontalRecyclableScrollView"), TEXT("VerticalRecyclableScrollView"),
+		};
+		IAssetRegistry& AssetRegistry = IAssetRegistry::GetChecked();
+		FItemPtr Header;
+		for (const TCHAR* ControlName : ControlNames)
+		{
+			if (bFilterActive && !SearchFilter.TestTextFilter(FBasicStringFilterExpressionContext(ControlName)))
+			{
+				continue;
+			}
+			const FString ObjectPath = FString::Printf(TEXT("%s%s.%s"), *LGUIEditorTools::LGUIPresetPrefabPath, ControlName, ControlName);
+			FAssetData AssetData = AssetRegistry.GetAssetByObjectPath(FSoftObjectPath(ObjectPath));
+			if (!AssetData.IsValid())continue;//plugin content not mounted/scanned yet
+			if (!Header.IsValid())
+			{
+				Header = MakeShared<FLGUIPrefabPaletteItem>();
+				Header->CategoryName = TEXT("Controls");
+				Header->bIsComponentGroup = true;
+			}
+			auto Item = MakeShared<FLGUIPrefabPaletteItem>();
+			Item->Asset = AssetData;
+			Header->Children.Add(Item);
+			AddToFavoritesHeaderIfFavorite(Item, InOutFavoritesHeader);
+		}
+		if (Header.IsValid())
+		{
+			OutGroupHeaders.Add(Header);
+		}
+	}
+}
+
+void SLGUIPrefabPalette::CollectPrefabCategories(TArray<FItemPtr>& OutHeaders, FItemPtr& InOutFavoritesHeader)
+{
 	TArray<FAssetData> PrefabAssets;
 	IAssetRegistry::GetChecked().GetAssetsByClass(ULGUIPrefab::StaticClass()->GetClassPathName(), PrefabAssets, true);
 
@@ -273,11 +406,15 @@ void SLGUIPrefabPalette::RebuildList()
 
 	const bool bFilterActive = !SearchFilter.GetFilterText().IsEmpty();
 	TMap<FString, FItemPtr> CategoryMap;
-	FItemPtr FavoritesHeader;
 	for (auto& AssetData : PrefabAssets)
 	{
 		// the prefab being edited can never be its own child -- hide it
 		if (EditingPrefabPath.IsValid() && AssetData.ToSoftObjectPath() == EditingPrefabPath)
+		{
+			continue;
+		}
+		// the plugin's built-in preset prefabs live in the Elements tab
+		if (AssetData.PackageName.ToString().StartsWith(TEXT("/LGUI/Prefabs/")))
 		{
 			continue;
 		}
@@ -304,52 +441,52 @@ void SLGUIPrefabPalette::RebuildList()
 		auto Item = MakeShared<FLGUIPrefabPaletteItem>();
 		Item->Asset = AssetData;
 		Header->Children.Add(Item);
-
-		// favorited prefabs additionally appear under the pinned Favorites group (UMG behavior)
-		if (IsFavorite(AssetData))
-		{
-			if (!FavoritesHeader.IsValid())
-			{
-				FavoritesHeader = MakeShared<FLGUIPrefabPaletteItem>();
-				FavoritesHeader->bIsFavoritesGroup = true;
-			}
-			auto FavItem = MakeShared<FLGUIPrefabPaletteItem>();
-			FavItem->Asset = AssetData;
-			FavoritesHeader->Children.Add(FavItem);
-		}
+		AddToFavoritesHeaderIfFavorite(Item, InOutFavoritesHeader);
 	}
 
-	CategoryMap.GenerateValueArray(RootItems);
+	CategoryMap.GenerateValueArray(OutHeaders);
 	// alphabetical categories, "Uncategorized" (empty) pinned to the bottom
-	RootItems.Sort([](const FItemPtr& A, const FItemPtr& B) {
+	OutHeaders.Sort([](const FItemPtr& A, const FItemPtr& B) {
 		if (A->CategoryName.IsEmpty() != B->CategoryName.IsEmpty())
 		{
 			return B->CategoryName.IsEmpty();
 		}
 		return A->CategoryName < B->CategoryName;
 		});
-	// component-class groups (Interaction/Layout/Effect/Behaviour) above the prefab categories;
-	// may also append favorited classes to FavoritesHeader
-	{
-		TArray<FItemPtr> ComponentGroups;
-		CollectComponentClassGroups(ComponentGroups, FavoritesHeader);
-		for (int i = ComponentGroups.Num() - 1; i >= 0; i--)
-		{
-			RootItems.Insert(ComponentGroups[i], 0);
-		}
-	}
-	// Favorites pinned to the very top
-	if (FavoritesHeader.IsValid())
-	{
-		RootItems.Insert(FavoritesHeader, 0);
-	}
-	for (auto& Header : RootItems)
+	// prefab rows in name order (class-item groups keep their own curated order)
+	for (auto& Header : OutHeaders)
 	{
 		Header->Children.Sort([](const FItemPtr& A, const FItemPtr& B) {
 			return A->Asset.AssetName.LexicalLess(B->Asset.AssetName);
 			});
 	}
 	KnownCategories.Sort();
+}
+
+void SLGUIPrefabPalette::RebuildList()
+{
+	RootItems.Reset();
+	KnownCategories.Reset();
+
+	FItemPtr FavoritesHeader;
+	switch (CurrentTab)
+	{
+	case ELGUIPaletteTab::Elements:
+		CollectElementGroups(RootItems, FavoritesHeader);
+		break;
+	case ELGUIPaletteTab::Components:
+		CollectComponentClassGroups(RootItems, FavoritesHeader);
+		break;
+	case ELGUIPaletteTab::Prefabs:
+		CollectPrefabCategories(RootItems, FavoritesHeader);
+		break;
+	}
+
+	// Favorites (of the current tab's content) pinned to the very top
+	if (FavoritesHeader.IsValid())
+	{
+		RootItems.Insert(FavoritesHeader, 0);
+	}
 
 	if (TreeView.IsValid())
 	{
