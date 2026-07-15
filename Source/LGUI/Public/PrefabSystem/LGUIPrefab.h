@@ -199,6 +199,13 @@ public:
 	/** The time point when create/save this prefab. Use UtcNow from prefab version 6. */
 	UPROPERTY(VisibleAnywhere, Category = "LGUI")
 		FDateTime CreateTime;
+	/**
+	 * Grouping category shown in the Prefab Editor's "Prefab Palette" tab. Prefabs with the same
+	 * category are listed under one header; empty means "Uncategorized".
+	 * AssetRegistrySearchable so the palette can read it from the asset registry without loading the asset.
+	 */
+	UPROPERTY(EditAnywhere, AssetRegistrySearchable, Category = "LGUI")
+		FString PaletteCategory;
 #endif
 	/** Prefab system's version when creating this prefab */
 	UPROPERTY()

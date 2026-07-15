@@ -99,6 +99,7 @@ private:
 	TSharedPtr<SLGUIPrefabEditorDetails> DetailsPtr;
 	TSharedPtr<FLGUIPrefabEditorOutliner> OutlinerPtr;
 	TSharedPtr<SLGUIPrefabRawDataViewer> PrefabRawDataViewer;
+	TSharedPtr<class SLGUIPrefabPalette> PalettePtr;
 
 	TWeakObjectPtr<AActor> CurrentSelectedActor;
 
@@ -120,6 +121,7 @@ private:
 	TSharedRef<SDockTab> SpawnTab_Details(const FSpawnTabArgs& Args);
 	TSharedRef<SDockTab> SpawnTab_Outliner(const FSpawnTabArgs& Args);
 	TSharedRef<SDockTab> SpawnTab_PrefabRawDataViewer(const FSpawnTabArgs& Args);
+	TSharedRef<SDockTab> SpawnTab_PrefabPalette(const FSpawnTabArgs& Args);
 
 	bool IsFilteredActor(const AActor* Actor);
 	void OnOutlinerPickedChanged(AActor* Actor);

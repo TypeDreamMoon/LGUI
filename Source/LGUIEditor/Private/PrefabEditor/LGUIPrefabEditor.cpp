@@ -7,6 +7,7 @@
 #include "LGUIPrefabEditorDetails.h"
 #include "LGUIPrefabEditorOutliner.h"
 #include "LGUIPrefabRawDataViewer.h"
+#include "SLGUIPrefabPalette.h"
 #include "UnrealEdGlobals.h"
 #include "EditorModeManager.h"
 #include "EngineUtils.h"
@@ -47,12 +48,14 @@ struct FLGUIPrefabEditorTabs
 	static const FName ViewportID;
 	static const FName OutlinerID;
 	static const FName PrefabRawDataViewerID;
+	static const FName PrefabPaletteID;
 };
 
 const FName FLGUIPrefabEditorTabs::DetailsID(TEXT("Details"));
 const FName FLGUIPrefabEditorTabs::ViewportID(TEXT("Viewport"));
 const FName FLGUIPrefabEditorTabs::OutlinerID(TEXT("Outliner"));
 const FName FLGUIPrefabEditorTabs::PrefabRawDataViewerID(TEXT("PrefabRawDataViewer"));
+const FName FLGUIPrefabEditorTabs::PrefabPaletteID(TEXT("PrefabPalette"));
 
 FName GetPrefabWorldName()
 {
@@ -302,6 +305,11 @@ void FLGUIPrefabEditor::RegisterTabSpawners(const TSharedRef<FTabManager>& InTab
 		.SetDisplayName(LOCTEXT("PrefabRawDataViewerTabLabel", "PrefabRawDataViewer"))
 		.SetGroup(WorkspaceMenuCategoryRef)
 		;
+
+	InTabManager->RegisterTabSpawner(FLGUIPrefabEditorTabs::PrefabPaletteID, FOnSpawnTab::CreateSP(this, &FLGUIPrefabEditor::SpawnTab_PrefabPalette))
+		.SetDisplayName(LOCTEXT("PrefabPaletteTabLabel", "Prefab Palette"))
+		.SetGroup(WorkspaceMenuCategoryRef)
+		.SetIcon(FSlateIcon(FAppStyle::GetAppStyleSetName(), "Kismet.Tabs.Palette"));
 }
 void FLGUIPrefabEditor::UnregisterTabSpawners(const TSharedRef<FTabManager>& InTabManager)
 {
@@ -311,6 +319,7 @@ void FLGUIPrefabEditor::UnregisterTabSpawners(const TSharedRef<FTabManager>& InT
 	InTabManager->UnregisterTabSpawner(FLGUIPrefabEditorTabs::DetailsID);
 	InTabManager->UnregisterTabSpawner(FLGUIPrefabEditorTabs::OutlinerID);
 	InTabManager->UnregisterTabSpawner(FLGUIPrefabEditorTabs::PrefabRawDataViewerID);
+	InTabManager->UnregisterTabSpawner(FLGUIPrefabEditorTabs::PrefabPaletteID);
 }
 
 void FLGUIPrefabEditor::InitPrefabEditor(const EToolkitMode::Type Mode, const TSharedPtr<IToolkitHost >& InitToolkitHost, ULGUIPrefab* InPrefab)
@@ -347,6 +356,8 @@ void FLGUIPrefabEditor::InitPrefabEditor(const EToolkitMode::Type Mode, const TS
 
 	PrefabRawDataViewer = SNew(SLGUIPrefabRawDataViewer, PrefabEditorPtr, PrefabBeingEdited);
 
+	PalettePtr = SNew(SLGUIPrefabPalette, PrefabEditorPtr);
+
 	auto UnexpendActorGuidSet = PrefabBeingEdited->PrefabDataForPrefabEditor.UnexpendActorSet;
 	TSet<AActor*> UnexpendActorSet;
 	for (auto& ItemActorGuid : UnexpendActorGuidSet)
@@ -369,7 +380,7 @@ void FLGUIPrefabEditor::InitPrefabEditor(const EToolkitMode::Type Mode, const TS
 	ExtendToolbar();
 
 	// Default layout
-	const TSharedRef<FTabManager::FLayout> StandaloneDefaultLayout = FTabManager::NewLayout("Standalone_LGUIPrefabEditor_Layout_v1")
+	const TSharedRef<FTabManager::FLayout> StandaloneDefaultLayout = FTabManager::NewLayout("Standalone_LGUIPrefabEditor_Layout_v2")
 		->AddArea
 		(
 			FTabManager::NewPrimaryArea()
@@ -384,6 +395,8 @@ void FLGUIPrefabEditor::InitPrefabEditor(const EToolkitMode::Type Mode, const TS
 					FTabManager::NewStack()
 					->SetSizeCoefficient(0.2f)
 					->AddTab(FLGUIPrefabEditorTabs::OutlinerID, ETabState::OpenedTab)
+					->AddTab(FLGUIPrefabEditorTabs::PrefabPaletteID, ETabState::OpenedTab)
+					->SetForegroundTab(FLGUIPrefabEditorTabs::OutlinerID)
 				)
 				->Split
 				(
@@ -712,6 +725,16 @@ TSharedRef<SDockTab> FLGUIPrefabEditor::SpawnTab_PrefabRawDataViewer(const FSpaw
 		.Label(LOCTEXT("OverrideParameterTab_Title", "PrefabRawData"))
 		[
 			PrefabRawDataViewer.ToSharedRef()
+		];
+}
+
+TSharedRef<SDockTab> FLGUIPrefabEditor::SpawnTab_PrefabPalette(const FSpawnTabArgs& Args)
+{
+	// Spawn the tab
+	return SNew(SDockTab)
+		.Label(LOCTEXT("PrefabPaletteTab_Title", "Prefab Palette"))
+		[
+			PalettePtr.ToSharedRef()
 		];
 }
 
