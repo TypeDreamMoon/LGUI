@@ -19,7 +19,10 @@
 #include "UObject/ObjectSaveContext.h"
 #include "Core/ActorComponent/UIItem.h"
 
+#include "LGUI.h"//LGUI_CAN_DISABLE_OPTIMIZATION
+#if LGUI_CAN_DISABLE_OPTIMIZATION
 UE_DISABLE_OPTIMIZATION
+#endif
 
 #define LOCTEXT_NAMESPACE "LGUINativeSceneOutlinerExtension"
 FLGUINativeSceneOutlinerExtension::FLGUINativeSceneOutlinerExtension()
@@ -329,4 +332,6 @@ void FLGUINativeSceneOutlinerExtension::RestoreSceneOutlinerState()
 }
 #undef LOCTEXT_NAMESPACE
 
+#if LGUI_CAN_DISABLE_OPTIMIZATION
 UE_ENABLE_OPTIMIZATION
+#endif

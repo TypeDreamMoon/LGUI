@@ -34,7 +34,10 @@
 
 #define LOCTEXT_NAMESPACE "LGUIEditorTools"
 
+#include "LGUI.h"//LGUI_CAN_DISABLE_OPTIMIZATION
+#if LGUI_CAN_DISABLE_OPTIMIZATION
 UE_DISABLE_OPTIMIZATION
+#endif
 
 FEditingPrefabChangedDelegate LGUIEditorTools::OnEditingPrefabChanged;
 FBeforeApplyPrefabDelegate LGUIEditorTools::OnBeforeApplyPrefab;
@@ -2296,6 +2299,8 @@ void LGUIEditorTools::ForceGC()
 	GEngine->ForceGarbageCollection();
 }
 
+#if LGUI_CAN_DISABLE_OPTIMIZATION
 UE_ENABLE_OPTIMIZATION
+#endif
 
 #undef LOCTEXT_NAMESPACE

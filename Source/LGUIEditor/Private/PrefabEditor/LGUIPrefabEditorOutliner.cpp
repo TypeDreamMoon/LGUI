@@ -21,12 +21,16 @@
 #include "ActorBrowsingMode.h"
 #include "DragAndDrop/AssetDragDropOp.h"
 #include "LGUIPrefabEditorCommand.h"
+#include "Framework/Commands/GenericCommands.h"
 #include "Framework/MultiBox/MultiBoxBuilder.h"
 #include "Editor.h"
 
 #define LOCTEXT_NAMESPACE "LGUIPrefabEditorOutliner"
 
+#include "LGUI.h"//LGUI_CAN_DISABLE_OPTIMIZATION
+#if LGUI_CAN_DISABLE_OPTIMIZATION
 UE_DISABLE_OPTIMIZATION
+#endif
 
 /**
  * Actor browser mode for the Prefab Editor outliner. Identical to the stock actor browser,
@@ -120,15 +124,16 @@ public:
 		}
 
 		// build from the prefab editor's toolkit command list, so entries show their key bindings
-		// and share CanExecute/Execute with the viewport shortcuts
+		// and share CanExecute/Execute with the viewport shortcuts. The Edit section uses the
+		// engine generic commands (Ctrl+X/C/V/W) mapped in BindCommands.
 		const FLGUIPrefabEditorCommand& Commands = FLGUIPrefabEditorCommand::Get();
 		FMenuBuilder MenuBuilder(true, PrefabEditor->GetToolkitCommands());
 		MenuBuilder.BeginSection("LGUIPrefabOutlinerEdit", LOCTEXT("OutlinerEditSection", "Edit"));
 		{
-			MenuBuilder.AddMenuEntry(Commands.CutActor);
-			MenuBuilder.AddMenuEntry(Commands.CopyActor);
-			MenuBuilder.AddMenuEntry(Commands.PasteActor);
-			MenuBuilder.AddMenuEntry(Commands.DuplicateActor);
+			MenuBuilder.AddMenuEntry(FGenericCommands::Get().Cut);
+			MenuBuilder.AddMenuEntry(FGenericCommands::Get().Copy);
+			MenuBuilder.AddMenuEntry(FGenericCommands::Get().Paste);
+			MenuBuilder.AddMenuEntry(FGenericCommands::Get().Duplicate);
 		}
 		MenuBuilder.EndSection();
 		MenuBuilder.BeginSection("LGUIPrefabOutlinerDelete", LOCTEXT("OutlinerDeleteSection", "Delete"));
@@ -395,5 +400,7 @@ void FLGUIPrefabEditorOutliner::GetUnexpendActor(TArray<AActor*>& InOutAllActors
 
 #undef LOCTEXT_NAMESPACE
 
+#if LGUI_CAN_DISABLE_OPTIMIZATION
 UE_ENABLE_OPTIMIZATION
+#endif
 

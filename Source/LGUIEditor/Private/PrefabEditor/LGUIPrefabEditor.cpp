@@ -19,6 +19,7 @@
 #include "Kismet2/ComponentEditorUtils.h"
 #include "Misc/FeedbackContext.h"
 #include "LGUIPrefabEditorCommand.h"
+#include "Framework/Commands/GenericCommands.h"
 #include "Framework/MultiBox/MultiBoxExtender.h"
 #include "LGUIEditorTools.h"
 #include "Engine/Selection.h"
@@ -36,7 +37,10 @@
 
 #define LOCTEXT_NAMESPACE "LGUIPrefabEditor"
 
+#include "LGUI.h"//LGUI_CAN_DISABLE_OPTIMIZATION
+#if LGUI_CAN_DISABLE_OPTIMIZATION
 UE_DISABLE_OPTIMIZATION
+#endif
 
 const FName PrefabEditorAppName = FName(TEXT("LGUIPrefabEditorApp"));
 
@@ -720,6 +724,31 @@ void FLGUIPrefabEditor::BindCommands()
 		FGetActionCheckState(),
 		FIsActionButtonVisible::CreateStatic(&LGUIEditorTools::CanDeleteActor)
 	);
+
+	// Standard editor shortcuts (Ctrl+C/V/X/W) via the engine's generic commands, mapped to the
+	// same implementations as the LGUI-specific Shift+Alt chords above (both keep working).
+	// Toolkit command lists take priority inside this editor's window, so these don't clash
+	// with the level editor. Text fields still consume Ctrl+C first (focused-widget priority).
+	ToolkitCommands->MapAction(
+		FGenericCommands::Get().Copy,
+		FExecuteAction::CreateStatic(&LGUIEditorTools::CopySelectedActors_Impl),
+		FCanExecuteAction::CreateStatic(&LGUIEditorTools::CanCopyActor)
+	);
+	ToolkitCommands->MapAction(
+		FGenericCommands::Get().Paste,
+		FExecuteAction::CreateStatic(&LGUIEditorTools::PasteSelectedActors_Impl),
+		FCanExecuteAction::CreateStatic(&LGUIEditorTools::CanPasteActor)
+	);
+	ToolkitCommands->MapAction(
+		FGenericCommands::Get().Cut,
+		FExecuteAction::CreateStatic(&LGUIEditorTools::CutSelectedActors_Impl),
+		FCanExecuteAction::CreateStatic(&LGUIEditorTools::CanCutActor)
+	);
+	ToolkitCommands->MapAction(
+		FGenericCommands::Get().Duplicate,
+		FExecuteAction::CreateStatic(&LGUIEditorTools::DuplicateSelectedActors_Impl),
+		FCanExecuteAction::CreateStatic(&LGUIEditorTools::CanDuplicateActor)
+	);
 }
 void FLGUIPrefabEditor::ExtendToolbar()
 {
@@ -1124,6 +1153,8 @@ FReply FLGUIPrefabEditor::HandleAssetsDropOnParentActor(const TArray<FAssetData>
 	}
 }
 
+#if LGUI_CAN_DISABLE_OPTIMIZATION
 UE_ENABLE_OPTIMIZATION
+#endif
 
 #undef LOCTEXT_NAMESPACE

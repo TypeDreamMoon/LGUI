@@ -28,7 +28,19 @@ void SLGUIPrefabOverrideDataViewer::SetPrefabHelperObject(ULGUIPrefabHelperObjec
 void SLGUIPrefabOverrideDataViewer::RefreshDataContent(TArray<FLGUIPrefabOverrideParameterData> ObjectOverrideParameterArray, AActor* InReferenceActor)
 {
 	RootContentVerticalBox->ClearChildren();
-	if (ObjectOverrideParameterArray.Num() == 0)return;
+	if (ObjectOverrideParameterArray.Num() == 0)
+	{
+		// explicit empty state instead of a blank popup
+		RootContentVerticalBox->AddSlot()
+			.AutoHeight()
+			.Padding(FMargin(8, 6))
+			[
+				SNew(STextBlock)
+				.Text(LOCTEXT("NoOverrides", "No overridden properties."))
+				.ColorAndOpacity(FSlateColor::UseSubduedForeground())
+			];
+		return;
+	}
 
 	auto RootObject = ObjectOverrideParameterArray[0].Object.Get();
 	if (InReferenceActor != nullptr)

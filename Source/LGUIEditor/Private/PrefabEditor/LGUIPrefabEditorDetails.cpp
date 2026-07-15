@@ -16,6 +16,7 @@
 #include "LGUIEditorTools.h"
 #include "SSubobjectEditorModule.h"
 #include "SSubobjectInstanceEditor.h"
+#include "Widgets/Layout/SScrollBox.h"
 
 #define LOCTEXT_NAMESPACE "LGUIPrefabEditorDetailTab"
 
@@ -139,39 +140,63 @@ void SLGUIPrefabEditorDetails::Construct(const FArguments& Args, TSharedPtr<FLGU
 						SNew(SComboButton)
 						.HasDownArrow(true)
 						.ToolTipText(LOCTEXT("PrefabOverride", "Edit override parameters for this prefab"))
+						// refresh the list every time the popup opens -- overrides may have been
+						// added by property edits since the actor was selected
+						.OnComboBoxOpened(this, &SLGUIPrefabEditorDetails::RefreshOverrideParameter)
 						.ButtonContent()
 						[
 							SNew(STextBlock)
-							.Text(LOCTEXT("OverrideButton", "Prefab Override Properties"))
+							// live override count on the button
+							.Text_Lambda([this]() {
+								int32 Count = 0;
+								if (CachedActor.IsValid() && PrefabEditorPtr.IsValid())
+								{
+									auto SubPrefabData = PrefabEditorPtr.Pin()->GetSubPrefabDataForActor(CachedActor.Get());
+									for (auto& Item : SubPrefabData.ObjectOverrideParameterArray)
+									{
+										Count += Item.MemberPropertyNames.Num();
+									}
+								}
+								return Count > 0
+									? FText::Format(LOCTEXT("OverrideButtonWithCount", "Prefab Override Properties ({0})"), Count)
+									: LOCTEXT("OverrideButton", "Prefab Override Properties");
+								})
 							.Font(IDetailLayoutBuilder::GetDetailFont())
 						]
 						.MenuContent()
 						[
+							// cap the popup height and make it scrollable -- prefabs with many
+							// overrides used to overflow the screen
 							SNew(SBox)
 							.Padding(FMargin(4, 4))
+							.MaxDesiredHeight(500)
 							[
-								SNew(SHorizontalBox)
-								+SHorizontalBox::Slot()
-								.AutoWidth()
+								SNew(SScrollBox)
+								+SScrollBox::Slot()
 								[
-									SNew(SVerticalBox)
-									+SVerticalBox::Slot()
-									.AutoHeight()
+									SNew(SHorizontalBox)
+									+SHorizontalBox::Slot()
+									.AutoWidth()
 									[
-										SNew(SHorizontalBox)
-										+SHorizontalBox::Slot()
-										.AutoWidth()
+										SNew(SVerticalBox)
+										+SVerticalBox::Slot()
+										.AutoHeight()
 										[
-											SAssignNew(OverrideParameterEditor, SLGUIPrefabOverrideDataViewer, PrefabEditorPtr.Pin()->GetPrefabManagerObject())
-											.AfterRevertPrefab_Lambda([=, this](ULGUIPrefab* PrefabAsset) {
-												RefreshOverrideParameter();
-												})
-											.AfterApplyPrefab_Lambda([=, this](ULGUIPrefab* PrefabAsset){
-												RefreshOverrideParameter();
-												LGUIEditorTools::RefreshLevelLoadedPrefab(PrefabAsset);
-												LGUIEditorTools::RefreshOnSubPrefabChange(PrefabAsset);
-												LGUIEditorTools::RefreshOpenedPrefabEditor(PrefabAsset);
-												})
+											SNew(SHorizontalBox)
+											+SHorizontalBox::Slot()
+											.AutoWidth()
+											[
+												SAssignNew(OverrideParameterEditor, SLGUIPrefabOverrideDataViewer, PrefabEditorPtr.Pin()->GetPrefabManagerObject())
+												.AfterRevertPrefab_Lambda([=, this](ULGUIPrefab* PrefabAsset) {
+													RefreshOverrideParameter();
+													})
+												.AfterApplyPrefab_Lambda([=, this](ULGUIPrefab* PrefabAsset){
+													RefreshOverrideParameter();
+													LGUIEditorTools::RefreshLevelLoadedPrefab(PrefabAsset);
+													LGUIEditorTools::RefreshOnSubPrefabChange(PrefabAsset);
+													LGUIEditorTools::RefreshOpenedPrefabEditor(PrefabAsset);
+													})
+											]
 										]
 									]
 								]
