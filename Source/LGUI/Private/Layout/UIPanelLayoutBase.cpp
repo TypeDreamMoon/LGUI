@@ -170,6 +170,17 @@ TObjectPtr<UUIPanelLayoutSlotBase> UUIPanelLayoutBase::GetChildSlot(UUIItem* InC
     }
     return nullptr;
 }
+UUIPanelLayoutSlotBase* UUIPanelLayoutBase::GetOrCreateChildSlot(UUIItem* InChild)
+{
+    if (InChild == nullptr)return nullptr;
+    // only for actual UI children of this layout, so stray calls don't grow the map
+    // (CleanMapChildToSlot would drop such entries on the next children-list rebuild anyway)
+    if (!CheckRootUIComponent() || InChild->GetAttachParent() != RootUIComp)return nullptr;
+    UObject* LayoutElement = nullptr;
+    bool bIgnoreLayout = false;
+    GetLayoutElement(InChild, LayoutElement, bIgnoreLayout);
+    return Cast<UUIPanelLayoutSlotBase>(LayoutElement);
+}
 #if WITH_EDITOR
 FText UUIPanelLayoutBase::GetCategoryDisplayName()const
 {

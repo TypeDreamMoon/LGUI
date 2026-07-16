@@ -32,6 +32,14 @@ protected:
 		mutable TMap<TObjectPtr<UUIItem>, TObjectPtr<UUIPanelLayoutSlotBase>> MapChildToSlot;
 public:
 	TObjectPtr<UUIPanelLayoutSlotBase> GetChildSlot(UUIItem* InChild);
+	/**
+	 * Get the slot for InChild, creating it if this layout has not seen the child yet --
+	 * GetChildSlot returns null until the first layout rebuild, which makes configuring a
+	 * slot right after attaching a child from code (UI builder, blueprint, script) impossible.
+	 * InChild must be an attached UI child of this layout's root.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Panel Layout")
+		UUIPanelLayoutSlotBase* GetOrCreateChildSlot(UUIItem* InChild);
 	virtual UClass* GetPanelLayoutSlotClass()const PURE_VIRTUAL(UUIPanelLayoutBase::GeneratePanelLayoutSlot, return nullptr;);
 #if WITH_EDITOR
 	/** Return category name for editor display */
