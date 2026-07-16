@@ -10,6 +10,7 @@
 #include "Core/Actor/UIContainerActor.h"
 #include "Layout/LGUICanvasScaler.h"
 #include "Event/LGUIEventSystem.h"
+#include "Event/LGUIScreenSpaceRaycaster.h"
 #include "Event/InputModule/LGUI_StandaloneInputModule.h"
 #include "EngineUtils.h"
 #include "UObject/UObjectIterator.h"
@@ -66,6 +67,14 @@ UUIItem* ULGUIBPLibrary::GetOrCreateScreenSpaceUIRoot(UObject* WorldContextObjec
 	auto Scaler = NewObject<ULGUICanvasScaler>(RootActor);
 	RootActor->AddInstanceComponent(Scaler);
 	Scaler->RegisterComponent();
+	// the raycaster is LGUI's GraphicRaycaster counterpart: without it pointer events have
+	// nothing to hit-test against and every button/slider is dead. Its default trace
+	// channel matches UIItem's default (TraceTypeQuery3, the "LGUI" channel Basic Setup
+	// registers in DefaultEngine.ini).
+	auto Raycaster = NewObject<ULGUIScreenSpaceRaycaster>(RootActor);
+	RootActor->AddInstanceComponent(Raycaster);
+	Raycaster->RegisterComponent();
+	Raycaster->AttachToComponent(RootActor->GetRootComponent(), FAttachmentTransformRules::KeepRelativeTransform);
 
 	// interaction needs an event system + input module; built from code as well so the
 	// whole path has no dependency on plugin demo content
