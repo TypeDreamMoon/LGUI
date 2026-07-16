@@ -16,6 +16,7 @@ class UUIItem;
 class UUIPanelLayoutSlotBase;
 class ULGUIPrefab;
 class ULGUISpriteData_BaseObject;
+class ULGUIFontData_BaseObject;
 class UTexture;
 
 /**
@@ -135,6 +136,8 @@ namespace LGUIBuilder
 		//--- type-specific sugar (no-op with a warning when the root component type differs) ---
 		FUINode& Text(const FText& InText);
 		FUINode& FontSize(float InSize);
+		/** Explicit font; without it texts use the project default (LGUI settings "DefaultFont", falling back to the plugin's built-in font which has NO CJK glyphs). */
+		FUINode& Font(ULGUIFontData_BaseObject* InFont);
 		FUINode& Sprite(ULGUISpriteData_BaseObject* InSprite, bool bSetNativeSize = false);
 		FUINode& Texture(UTexture* InTexture);
 

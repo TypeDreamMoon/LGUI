@@ -71,6 +71,15 @@ class LGUI_API ULGUISettings :public UDeveloperSettings
 public:
 	virtual FName GetCategoryName()const override { return TEXT("Plugins"); }
 public:
+	/**
+	 * Project-wide default font for UIText. When set, it replaces the plugin's built-in
+	 * DefaultSDFFont everywhere a text has no font assigned -- the built-in font has no
+	 * CJK glyphs, so projects with Chinese/Japanese/Korean text should point this at a
+	 * font asset built from a suitable ttf.
+	 */
+	UPROPERTY(EditAnywhere, config, Category = Text)
+		TSoftObjectPtr<class ULGUIFontData_BaseObject> DefaultFont;
+
 	/** default atlas setting */
 	UPROPERTY(EditAnywhere, config, Category = Sprite)
 		FLGUIAtlasSettings defaultAtlasSetting;

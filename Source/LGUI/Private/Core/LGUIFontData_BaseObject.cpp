@@ -3,11 +3,17 @@
 #include "Core/LGUIFontData_BaseObject.h"
 #include "LGUI.h"
 #include "Utils/LGUIUtils.h"
+#include "Core/LGUISettings.h"
 
 #define LOCTEXT_NAMESPACE "LGUIFontData_BaseObject"
 
 ULGUIFontData_BaseObject* ULGUIFontData_BaseObject::GetDefaultFont()
 {
+	// project-wide override first (the built-in DefaultSDFFont carries no CJK glyphs)
+	if (auto ProjectDefaultFont = GetDefault<ULGUISettings>()->DefaultFont.LoadSynchronous())
+	{
+		return ProjectDefaultFont;
+	}
 	static auto defaultFont = LoadObject<ULGUIFontData_BaseObject>(NULL, TEXT("/LGUI/DefaultSDFFont"));
 	if (defaultFont == nullptr)
 	{

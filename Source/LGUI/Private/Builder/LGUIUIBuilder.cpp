@@ -164,6 +164,17 @@ FUINode& FUINode::FontSize(float InSize)
 		});
 	return *this;
 }
+FUINode& FUINode::Font(ULGUIFontData_BaseObject* InFont)
+{
+	ActorConfigs.Add([InFont](AActor* Actor)
+		{
+			if (auto TextComp = Local::GetRootAs<UUIText>(Actor, TEXT("Font")))
+			{
+				TextComp->SetFont(InFont);
+			}
+		});
+	return *this;
+}
 FUINode& FUINode::Sprite(ULGUISpriteData_BaseObject* InSprite, bool bSetNativeSize)
 {
 	ActorConfigs.Add([InSprite, bSetNativeSize](AActor* Actor)
