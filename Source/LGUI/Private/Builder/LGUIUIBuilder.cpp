@@ -21,6 +21,7 @@
 #include "Core/ActorComponent/LGUICanvas.h"
 #include "PrefabSystem/LGUIPrefab.h"
 #include "LGUIBPLibrary.h"
+#include "Core/LGUIScreenUISubsystem.h"
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
 
@@ -400,6 +401,20 @@ FBuiltUI FUINode::BuildToScreen(UWorld* InWorld, int32 InSortOrder)const
 			Canvas->RegisterComponent();
 		}
 		Canvas->SetSortOrder(InSortOrder, true);
+	}
+	return Result;
+}
+
+FBuiltUI FUINode::BuildToScreen(UWorld* InWorld, FName InScreenName, int32 InSortOrder)const
+{
+	FBuiltUI Result = BuildToScreen(InWorld, InSortOrder);
+	if (Result.Root != nullptr && !InScreenName.IsNone())
+	{
+		if (auto ScreenUISubsystem = ULGUIScreenUISubsystem::Get(InWorld))
+		{
+			// sort order was already applied above; register with 0 so it is not re-applied
+			ScreenUISubsystem->RegisterUI(InScreenName, Result.Root, 0);
+		}
 	}
 	return Result;
 }

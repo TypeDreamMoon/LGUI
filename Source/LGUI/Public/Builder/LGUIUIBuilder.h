@@ -175,6 +175,11 @@ namespace LGUIBuilder
 		 *                    sort order (AddToViewport's ZOrder).
 		 */
 		FBuiltUI BuildToScreen(UWorld* InWorld, int32 InSortOrder = 0)const;
+		/**
+		 * BuildToScreen + register the result in ULGUIScreenUISubsystem under InScreenName,
+		 * so the page is reachable by name from anywhere (GetUI / SetUIVisible / RemoveUI).
+		 */
+		FBuiltUI BuildToScreen(UWorld* InWorld, FName InScreenName, int32 InSortOrder)const;
 
 	private:
 		AActor* BuildInternal(UWorld* InWorld, USceneComponent* InParent, FBuiltUI& OutResult)const;
