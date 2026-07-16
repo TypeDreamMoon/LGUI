@@ -100,6 +100,8 @@ namespace LGUIBuilder
 		TSubclassOf<AActor> ActorClass;
 		ULGUIPrefab* Prefab = nullptr;
 		FString ElementName;
+		/** Set by Size/Anchor/AnchoredPosition/FillParent: BuildToScreen fills the screen by default UNLESS geometry was chosen explicitly. */
+		bool bHasExplicitGeometry = false;
 		TArray<FExtraComponent> ExtraComponents;
 		TArray<TFunction<void(AActor*)>> ActorConfigs;
 		TArray<TFunction<void(UUIPanelLayoutSlotBase*)>> SlotConfigs;
@@ -124,6 +126,8 @@ namespace LGUIBuilder
 		FUINode& Size(float InWidth, float InHeight);
 		FUINode& AnchoredPosition(float InX, float InY);
 		FUINode& Anchor(const FVector2D& InMin, const FVector2D& InMax);
+		/** Stretch to fill the parent (full anchors, zero offset). BuildToScreen applies this to the root by default. */
+		FUINode& FillParent();
 		FUINode& Pivot(const FVector2D& InPivot);
 		/** Tint of the root renderable (sprite/text/texture). */
 		FUINode& Color(const FColor& InColor);
@@ -173,7 +177,9 @@ namespace LGUIBuilder
 		/**
 		 * UMG AddToViewport counterpart, for screen-space UI: build under the world's
 		 * screen-space UI root, which is found -- or built clean from code (canvas +
-		 * scaler + event system, no demo content) -- on demand.
+		 * scaler + event system, no demo content) -- on demand. The built root FILLS THE
+		 * SCREEN by default, exactly like a viewport widget; give the root explicit
+		 * geometry (Size / Anchor / AnchoredPosition / FillParent) to opt out.
 		 * @param InSortOrder When not 0, the built root gets its own canvas layer with this
 		 *                    sort order (AddToViewport's ZOrder).
 		 */

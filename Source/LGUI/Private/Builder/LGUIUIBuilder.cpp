@@ -34,6 +34,15 @@ namespace Local
 	{
 		return InActor != nullptr ? Cast<UUIItem>(InActor->GetRootComponent()) : nullptr;
 	}
+	void StretchToFillParent(UUIItem* InItem)
+	{
+		FUIAnchorData AnchorData;
+		AnchorData.AnchorMin = FVector2D(0, 0);
+		AnchorData.AnchorMax = FVector2D(1, 1);
+		AnchorData.AnchoredPosition = FVector2D::ZeroVector;
+		AnchorData.SizeDelta = FVector2D::ZeroVector;
+		InItem->SetAnchorData(AnchorData);
+	}
 	template<class T>
 	T* GetRootAs(AActor* InActor, const TCHAR* InSugarName)
 	{
@@ -60,6 +69,7 @@ FUINode& FUINode::Name(const FString& InName)
 }
 FUINode& FUINode::Size(float InWidth, float InHeight)
 {
+	bHasExplicitGeometry = true;
 	ActorConfigs.Add([InWidth, InHeight](AActor* Actor)
 		{
 			if (auto Item = Local::GetRootUIItem(Actor))
@@ -72,6 +82,7 @@ FUINode& FUINode::Size(float InWidth, float InHeight)
 }
 FUINode& FUINode::AnchoredPosition(float InX, float InY)
 {
+	bHasExplicitGeometry = true;
 	ActorConfigs.Add([InX, InY](AActor* Actor)
 		{
 			if (auto Item = Local::GetRootUIItem(Actor))
@@ -83,12 +94,25 @@ FUINode& FUINode::AnchoredPosition(float InX, float InY)
 }
 FUINode& FUINode::Anchor(const FVector2D& InMin, const FVector2D& InMax)
 {
+	bHasExplicitGeometry = true;
 	ActorConfigs.Add([InMin, InMax](AActor* Actor)
 		{
 			if (auto Item = Local::GetRootUIItem(Actor))
 			{
 				Item->SetHorizontalAnchorMinMax(FVector2D(InMin.X, InMax.X), true);
 				Item->SetVerticalAnchorMinMax(FVector2D(InMin.Y, InMax.Y), true);
+			}
+		});
+	return *this;
+}
+FUINode& FUINode::FillParent()
+{
+	bHasExplicitGeometry = true;
+	ActorConfigs.Add([](AActor* Actor)
+		{
+			if (auto Item = Local::GetRootUIItem(Actor))
+			{
+				Local::StretchToFillParent(Item);
 			}
 		});
 	return *this;
@@ -401,6 +425,15 @@ FBuiltUI FUINode::BuildToScreen(UWorld* InWorld, int32 InSortOrder)const
 		return Result;
 	}
 	Result = Build(InWorld, ScreenRoot);
+	// UMG AddToViewport semantics: fill the screen unless geometry was chosen explicitly
+	// (Size / Anchor / AnchoredPosition / FillParent on the root node)
+	if (Result.Root != nullptr && !bHasExplicitGeometry)
+	{
+		if (auto RootItem = Local::GetRootUIItem(Result.Root))
+		{
+			Local::StretchToFillParent(RootItem);
+		}
+	}
 	if (Result.Root != nullptr && InSortOrder != 0)
 	{
 		// own canvas layer, AddToViewport(ZOrder) style
