@@ -66,8 +66,9 @@ public:
 		static void LoadPrefabAsync(UObject* WorldContextObject, TSoftObjectPtr<ULGUIPrefab> InPrefab, USceneComponent* InParent, FLGUIPrefab_LoadPrefabCallback OnLoaded, FLatentActionInfo LatentInfo, bool SetRelativeTransformToIdentity = false);
 	/**
 	 * The world's screen-space UI root (first ScreenSpaceOverlay root canvas). When there is
-	 * none it is created from the plugin's Basic-Setup prefab (canvas + canvas scaler), along
-	 * with an event system if the world lacks one -- everything UMG's AddToViewport assumes.
+	 * none, a clean one is built from code (container + canvas + canvas scaler, NO demo
+	 * content), along with an event system + input module if the world lacks one --
+	 * everything UMG's AddToViewport assumes.
 	 */
 	UFUNCTION(BlueprintCallable, meta = (WorldContext = "WorldContextObject"), Category = LGUI)
 		static class UUIItem* GetOrCreateScreenSpaceUIRoot(UObject* WorldContextObject);

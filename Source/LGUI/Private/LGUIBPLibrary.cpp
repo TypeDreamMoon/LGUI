@@ -7,7 +7,10 @@
 #include "Core/ActorComponent/UIItem.h"
 #include "Core/ActorComponent/UIBaseRenderable.h"
 #include "Core/ActorComponent/LGUICanvas.h"
+#include "Core/Actor/UIContainerActor.h"
+#include "Layout/LGUICanvasScaler.h"
 #include "Event/LGUIEventSystem.h"
+#include "Event/InputModule/LGUI_StandaloneInputModule.h"
 #include "EngineUtils.h"
 #include "UObject/UObjectIterator.h"
 #include "Framework/Application/SlateApplication.h"
@@ -50,19 +53,22 @@ UUIItem* ULGUIBPLibrary::GetOrCreateScreenSpaceUIRoot(UObject* WorldContextObjec
 		}
 	}
 
-	// none: create from the plugin's Basic-Setup prefab, which carries the canvas +
-	// canvas scaler preconfigured (same asset the editor's Basic Setup menu uses)
-	auto ScreenPrefab = LoadObject<ULGUIPrefab>(nullptr, TEXT("/LGUI/Prefabs/ScreenSpaceUI"));
-	if (ScreenPrefab == nullptr)
-	{
-		UE_LOG(LGUI, Error, TEXT("[ULGUIBPLibrary::GetOrCreateScreenSpaceUIRoot] Load ScreenSpaceUI prefab failed! Missing LGUI plugin content."));
-		return nullptr;
-	}
-	AActor* RootActor = ScreenPrefab->LoadPrefabWithTransform(World, nullptr
-		, FVector(0, 0, 250), FQuat::Identity, FVector::OneVector, nullptr);
+	// none: build a CLEAN root from code. Deliberately not the Basic-Setup prefab
+	// (/LGUI/Prefabs/ScreenSpaceUI) -- that asset is a demo scene carrying a frame
+	// container and an info text, which would pollute every programmatic screen UI.
+	AActor* RootActor = World->SpawnActor<AUIContainerActor>();
 	if (RootActor == nullptr)return nullptr;
+	auto Canvas = NewObject<ULGUICanvas>(RootActor);
+	RootActor->AddInstanceComponent(Canvas);
+	Canvas->RegisterComponent();
+	Canvas->SetRenderMode(ELGUIRenderMode::ScreenSpaceOverlay);
+	// the scaler drives the root's size/scale to match the viewport (defaults apply)
+	auto Scaler = NewObject<ULGUICanvasScaler>(RootActor);
+	RootActor->AddInstanceComponent(Scaler);
+	Scaler->RegisterComponent();
 
-	// interaction needs an event system; the preset blueprint carries the input module setup
+	// interaction needs an event system + input module; built from code as well so the
+	// whole path has no dependency on plugin demo content
 	bool bHasEventSystem = false;
 	for (TActorIterator<ALGUIEventSystemActor> EventSystemIt(World); EventSystemIt; ++EventSystemIt)
 	{
@@ -71,13 +77,11 @@ UUIItem* ULGUIBPLibrary::GetOrCreateScreenSpaceUIRoot(UObject* WorldContextObjec
 	}
 	if (!bHasEventSystem)
 	{
-		if (auto PresetEventSystemClass = LoadObject<UClass>(nullptr, TEXT("/LGUI/Blueprints/PresetEventSystemActor.PresetEventSystemActor_C")))
+		if (auto EventSystemActor = World->SpawnActor<ALGUIEventSystemActor>())
 		{
-			World->SpawnActor<AActor>(PresetEventSystemClass);
-		}
-		else
-		{
-			UE_LOG(LGUI, Warning, TEXT("[ULGUIBPLibrary::GetOrCreateScreenSpaceUIRoot] Load PresetEventSystemActor failed; UI will render but not respond to input."));
+			auto InputModule = NewObject<ULGUI_StandaloneInputModule>(EventSystemActor);
+			EventSystemActor->AddInstanceComponent(InputModule);
+			InputModule->RegisterComponent();
 		}
 	}
 	return Cast<UUIItem>(RootActor->GetRootComponent());

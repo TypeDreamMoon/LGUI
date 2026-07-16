@@ -172,8 +172,8 @@ namespace LGUIBuilder
 		FBuiltUI Build(UWorld* InWorld, USceneComponent* InParent)const;
 		/**
 		 * UMG AddToViewport counterpart, for screen-space UI: build under the world's
-		 * screen-space UI root, which is found -- or created from the plugin's Basic-Setup
-		 * prefab (canvas + scaler + event system) -- on demand.
+		 * screen-space UI root, which is found -- or built clean from code (canvas +
+		 * scaler + event system, no demo content) -- on demand.
 		 * @param InSortOrder When not 0, the built root gets its own canvas layer with this
 		 *                    sort order (AddToViewport's ZOrder).
 		 */
