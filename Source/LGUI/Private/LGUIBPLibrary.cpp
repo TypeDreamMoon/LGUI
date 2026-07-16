@@ -12,6 +12,8 @@
 #include "Event/LGUIEventSystem.h"
 #include "Event/LGUIScreenSpaceRaycaster.h"
 #include "Event/InputModule/LGUI_StandaloneInputModule.h"
+#include "Components/InputComponent.h"
+#include "GameFramework/PlayerController.h"
 #include "EngineUtils.h"
 #include "UObject/UObjectIterator.h"
 #include "Framework/Application/SlateApplication.h"
@@ -91,6 +93,43 @@ UUIItem* ULGUIBPLibrary::GetOrCreateScreenSpaceUIRoot(UObject* WorldContextObjec
 			auto InputModule = NewObject<ULGUI_StandaloneInputModule>(EventSystemActor);
 			EventSystemActor->AddInstanceComponent(InputModule);
 			InputModule->RegisterComponent();
+
+			// mouse -> input module wiring. ProcessInput only handles hover each frame;
+			// press/release/scroll "need manually setup" (LGUIEventSystem.h) -- normally
+			// the PresetEventSystemActor blueprint's job, here done in code.
+			if (auto PlayerController = World->GetFirstPlayerController())
+			{
+				EventSystemActor->EnableInput(PlayerController);
+			}
+			else
+			{
+				UE_LOG(LGUI, Warning, TEXT("[ULGUIBPLibrary::GetOrCreateScreenSpaceUIRoot] No player controller yet, mouse input is not wired -- create the screen UI after the player controller exists."));
+			}
+			if (auto InputComponent = EventSystemActor->InputComponent)
+			{
+				auto BindMouseButton = [InputComponent, InputModule](const FKey& InKey, EMouseButtonType InButtonType)
+					{
+						FInputKeyBinding Pressed(FInputChord(InKey), IE_Pressed);
+						Pressed.bConsumeInput = false;//UI decides via raycast; don't steal game input
+						Pressed.KeyDelegate.GetDelegateForManualSet().BindWeakLambda(InputModule
+							, [InputModule, InButtonType]() { InputModule->InputTrigger(true, InButtonType); });
+						InputComponent->KeyBindings.Add(MoveTemp(Pressed));
+
+						FInputKeyBinding Released(FInputChord(InKey), IE_Released);
+						Released.bConsumeInput = false;
+						Released.KeyDelegate.GetDelegateForManualSet().BindWeakLambda(InputModule
+							, [InputModule, InButtonType]() { InputModule->InputTrigger(false, InButtonType); });
+						InputComponent->KeyBindings.Add(MoveTemp(Released));
+					};
+				BindMouseButton(EKeys::LeftMouseButton, EMouseButtonType::Left);
+				BindMouseButton(EKeys::RightMouseButton, EMouseButtonType::Right);
+				BindMouseButton(EKeys::MiddleMouseButton, EMouseButtonType::Middle);
+
+				auto& ScrollBinding = InputComponent->BindAxisKey(EKeys::MouseWheelAxis);
+				ScrollBinding.bConsumeInput = false;
+				ScrollBinding.AxisDelegate.GetDelegateForManualSet().BindWeakLambda(InputModule
+					, [InputModule](float InValue) { if (InValue != 0.0f) { InputModule->InputScroll(FVector2D(0, InValue)); } });
+			}
 		}
 	}
 	return Cast<UUIItem>(RootActor->GetRootComponent());
