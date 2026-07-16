@@ -6,6 +6,10 @@
 #include "LTweenBPLibrary.h"
 #include "Core/ActorComponent/UIItem.h"
 #include "Core/ActorComponent/UIBaseRenderable.h"
+#include "Core/ActorComponent/LGUICanvas.h"
+#include "Event/LGUIEventSystem.h"
+#include "EngineUtils.h"
+#include "UObject/UObjectIterator.h"
 #include "Framework/Application/SlateApplication.h"
 #include "LGUI.h"
 #include "PrefabSystem/LGUIPrefab.h"
@@ -26,6 +30,78 @@ AActor* ULGUIBPLibrary::LoadPrefab(UObject* WorldContextObject, ULGUIPrefab* InP
 		return nullptr;
 	}
 	return InPrefab->LoadPrefab(WorldContextObject, InParent, InCallbackBeforeAwake, SetRelativeTransformToIdentity);
+}
+
+UUIItem* ULGUIBPLibrary::GetOrCreateScreenSpaceUIRoot(UObject* WorldContextObject)
+{
+	UWorld* World = GEngine->GetWorldFromContextObject(WorldContextObject, EGetWorldErrorMode::LogAndReturnNull);
+	if (World == nullptr)return nullptr;
+
+	// an existing screen-space root canvas wins
+	for (TObjectIterator<ULGUICanvas> CanvasIt; CanvasIt; ++CanvasIt)
+	{
+		ULGUICanvas* Canvas = *CanvasIt;
+		if (IsValid(Canvas) && Canvas->GetWorld() == World
+			&& Canvas->GetRenderMode() == ELGUIRenderMode::ScreenSpaceOverlay
+			&& Canvas->IsRootCanvas()
+			&& Canvas->GetUIItem() != nullptr)
+		{
+			return Canvas->GetUIItem();
+		}
+	}
+
+	// none: create from the plugin's Basic-Setup prefab, which carries the canvas +
+	// canvas scaler preconfigured (same asset the editor's Basic Setup menu uses)
+	auto ScreenPrefab = LoadObject<ULGUIPrefab>(nullptr, TEXT("/LGUI/Prefabs/ScreenSpaceUI"));
+	if (ScreenPrefab == nullptr)
+	{
+		UE_LOG(LGUI, Error, TEXT("[ULGUIBPLibrary::GetOrCreateScreenSpaceUIRoot] Load ScreenSpaceUI prefab failed! Missing LGUI plugin content."));
+		return nullptr;
+	}
+	AActor* RootActor = ScreenPrefab->LoadPrefabWithTransform(World, nullptr
+		, FVector(0, 0, 250), FQuat::Identity, FVector::OneVector, nullptr);
+	if (RootActor == nullptr)return nullptr;
+
+	// interaction needs an event system; the preset blueprint carries the input module setup
+	bool bHasEventSystem = false;
+	for (TActorIterator<ALGUIEventSystemActor> EventSystemIt(World); EventSystemIt; ++EventSystemIt)
+	{
+		bHasEventSystem = true;
+		break;
+	}
+	if (!bHasEventSystem)
+	{
+		if (auto PresetEventSystemClass = LoadObject<UClass>(nullptr, TEXT("/LGUI/Blueprints/PresetEventSystemActor.PresetEventSystemActor_C")))
+		{
+			World->SpawnActor<AActor>(PresetEventSystemClass);
+		}
+		else
+		{
+			UE_LOG(LGUI, Warning, TEXT("[ULGUIBPLibrary::GetOrCreateScreenSpaceUIRoot] Load PresetEventSystemActor failed; UI will render but not respond to input."));
+		}
+	}
+	return Cast<UUIItem>(RootActor->GetRootComponent());
+}
+
+AActor* ULGUIBPLibrary::LoadPrefabToScreen(UObject* WorldContextObject, ULGUIPrefab* InPrefab, const FLGUIPrefab_LoadPrefabCallback& InCallbackBeforeAwake, int32 SortOrder)
+{
+	if (InPrefab == nullptr)return nullptr;
+	UUIItem* ScreenRoot = GetOrCreateScreenSpaceUIRoot(WorldContextObject);
+	if (ScreenRoot == nullptr)return nullptr;
+	AActor* Actor = InPrefab->LoadPrefab(WorldContextObject, ScreenRoot, InCallbackBeforeAwake, true);
+	if (Actor != nullptr && SortOrder != 0)
+	{
+		// own canvas layer, UMG AddToViewport(ZOrder) style
+		auto Canvas = Actor->FindComponentByClass<ULGUICanvas>();
+		if (Canvas == nullptr)
+		{
+			Canvas = NewObject<ULGUICanvas>(Actor, NAME_None, RF_Transactional);
+			Actor->AddInstanceComponent(Canvas);
+			Canvas->RegisterComponent();
+		}
+		Canvas->SetSortOrder(SortOrder, true);
+	}
+	return Actor;
 }
 
 namespace LGUIBPLibraryLocal

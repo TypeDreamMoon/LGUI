@@ -37,7 +37,7 @@ class UTexture;
  *           TextBlock(LOCTEXT("Confirm", "OK"))
  *       ]
  *   }]
- *   .Build(GetWorld(), ParentUIItem);
+ *   .BuildToScreen(GetWorld());   // AddToViewport-style; or .Build(World, ParentUIItem)
  *
  *   UI.GetComponent<UUIText>(TEXT("Title"))->SetText(...);   // named lookup
  *
@@ -167,6 +167,14 @@ namespace LGUIBuilder
 
 		//--- build ---
 		FBuiltUI Build(UWorld* InWorld, USceneComponent* InParent)const;
+		/**
+		 * UMG AddToViewport counterpart, for screen-space UI: build under the world's
+		 * screen-space UI root, which is found -- or created from the plugin's Basic-Setup
+		 * prefab (canvas + scaler + event system) -- on demand.
+		 * @param InSortOrder When not 0, the built root gets its own canvas layer with this
+		 *                    sort order (AddToViewport's ZOrder).
+		 */
+		FBuiltUI BuildToScreen(UWorld* InWorld, int32 InSortOrder = 0)const;
 
 	private:
 		AActor* BuildInternal(UWorld* InWorld, USceneComponent* InParent, FBuiltUI& OutResult)const;

@@ -20,6 +20,7 @@
 #include "Layout/UIPanelLayout_FlexibleGrid.h"
 #include "Core/ActorComponent/LGUICanvas.h"
 #include "PrefabSystem/LGUIPrefab.h"
+#include "LGUIBPLibrary.h"
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
 
@@ -369,6 +370,36 @@ FBuiltUI FUINode::Build(UWorld* InWorld, USceneComponent* InParent)const
 		{
 			UE_LOG(LGUI, Warning, TEXT("[LGUIBuilder] Slot settings on the built root ignored: build parent has no panel layout."));
 		}
+	}
+	return Result;
+}
+
+FBuiltUI FUINode::BuildToScreen(UWorld* InWorld, int32 InSortOrder)const
+{
+	FBuiltUI Result;
+	if (InWorld == nullptr)
+	{
+		UE_LOG(LGUI, Error, TEXT("[LGUIBuilder] BuildToScreen called with null world."));
+		return Result;
+	}
+	UUIItem* ScreenRoot = ULGUIBPLibrary::GetOrCreateScreenSpaceUIRoot(InWorld);
+	if (ScreenRoot == nullptr)
+	{
+		UE_LOG(LGUI, Error, TEXT("[LGUIBuilder] BuildToScreen could not find or create a screen-space UI root."));
+		return Result;
+	}
+	Result = Build(InWorld, ScreenRoot);
+	if (Result.Root != nullptr && InSortOrder != 0)
+	{
+		// own canvas layer, AddToViewport(ZOrder) style
+		auto Canvas = Result.Root->FindComponentByClass<ULGUICanvas>();
+		if (Canvas == nullptr)
+		{
+			Canvas = NewObject<ULGUICanvas>(Result.Root, NAME_None, RF_Transactional);
+			Result.Root->AddInstanceComponent(Canvas);
+			Canvas->RegisterComponent();
+		}
+		Canvas->SetSortOrder(InSortOrder, true);
 	}
 	return Result;
 }

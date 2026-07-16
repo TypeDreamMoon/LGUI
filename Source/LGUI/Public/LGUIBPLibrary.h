@@ -65,6 +65,20 @@ public:
 	UFUNCTION(BlueprintCallable, meta = (AdvancedDisplay = "SetRelativeTransformToIdentity", UnsafeDuringActorConstruction = "true", WorldContext = "WorldContextObject", Latent, LatentInfo = "LatentInfo", DisplayName = "Load Prefab Async"), Category = LGUI)
 		static void LoadPrefabAsync(UObject* WorldContextObject, TSoftObjectPtr<ULGUIPrefab> InPrefab, USceneComponent* InParent, FLGUIPrefab_LoadPrefabCallback OnLoaded, FLatentActionInfo LatentInfo, bool SetRelativeTransformToIdentity = false);
 	/**
+	 * The world's screen-space UI root (first ScreenSpaceOverlay root canvas). When there is
+	 * none it is created from the plugin's Basic-Setup prefab (canvas + canvas scaler), along
+	 * with an event system if the world lacks one -- everything UMG's AddToViewport assumes.
+	 */
+	UFUNCTION(BlueprintCallable, meta = (WorldContext = "WorldContextObject"), Category = LGUI)
+		static class UUIItem* GetOrCreateScreenSpaceUIRoot(UObject* WorldContextObject);
+	/**
+	 * LoadPrefab onto the screen, UMG CreateWidget+AddToViewport style: attaches under the
+	 * world's screen-space UI root (created on demand, see GetOrCreateScreenSpaceUIRoot).
+	 * @param SortOrder When not 0, the loaded root gets its own canvas layer with this sort order.
+	 */
+	UFUNCTION(BlueprintCallable, meta = (AdvancedDisplay = "InCallbackBeforeAwake,SortOrder", UnsafeDuringActorConstruction = "true", WorldContext = "WorldContextObject", AutoCreateRefTerm = "InCallbackBeforeAwake"), Category = LGUI)
+		static AActor* LoadPrefabToScreen(UObject* WorldContextObject, ULGUIPrefab* InPrefab, const FLGUIPrefab_LoadPrefabCallback& InCallbackBeforeAwake, int32 SortOrder = 0);
+	/**
 	 * LoadPrefab to create actor.
 	 * Awake function in LGUILifeCycleBehaviour and LGUIPrefabInterface will be called right after LoadPrefab is done.
 	 * @param InParent Parent scene component that the created root actor will be attached to. Can be null so the created root actor will not attach to anyone.
