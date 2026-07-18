@@ -6,11 +6,16 @@
 #include "Core/ActorComponent/UIItem.h"
 #include "Core/ActorComponent/LGUICanvas.h"
 #include "Engine/World.h"
+#include "Engine/Engine.h"
 #include "GameFramework/Actor.h"
 
 ULGUIScreenUISubsystem* ULGUIScreenUISubsystem::Get(UWorld* InWorld)
 {
 	return InWorld != nullptr ? InWorld->GetSubsystem<ULGUIScreenUISubsystem>() : nullptr;
+}
+ULGUIScreenUISubsystem* ULGUIScreenUISubsystem::GetLGUIScreenUISubsystem(UObject* WorldContextObject)
+{
+	return Get(GEngine->GetWorldFromContextObject(WorldContextObject, EGetWorldErrorMode::LogAndReturnNull));
 }
 
 void ULGUIScreenUISubsystem::ApplySortOrder(AActor* InRoot, int32 InSortOrder)
@@ -33,6 +38,46 @@ void ULGUIScreenUISubsystem::DestroyEntry(FEntry& InEntry)
 		// LGUI pages are actor hierarchies; plain Destroy would orphan the children
 		ULGUIBPLibrary::DestroyActorWithHierarchy(Root, true);
 	}
+}
+
+FName ULGUIScreenUISubsystem::FindNameForActor(AActor* InRoot)const
+{
+	if (InRoot == nullptr)return NAME_None;
+	for (auto& KeyValue : Entries)
+	{
+		if (KeyValue.Value.Root.Get() == InRoot)
+		{
+			return KeyValue.Key;
+		}
+	}
+	return NAME_None;
+}
+
+void ULGUIScreenUISubsystem::AddToViewport(AActor* InRoot, int32 InSortOrder)
+{
+	if (InRoot == nullptr)return;
+	// already tracked: just re-apply the sort order, don't double-register
+	if (!FindNameForActor(InRoot).IsNone())
+	{
+		ApplySortOrder(InRoot, InSortOrder);
+		return;
+	}
+	const FName AutoName(*FString::Printf(TEXT("__Viewport_%d"), AutoNameCounter++));
+	RegisterUI(AutoName, InRoot, InSortOrder);
+}
+
+void ULGUIScreenUISubsystem::RemoveFromViewport(AActor* InRoot)
+{
+	const FName Name = FindNameForActor(InRoot);
+	if (!Name.IsNone())
+	{
+		RemoveUI(Name);
+	}
+}
+
+bool ULGUIScreenUISubsystem::IsInViewport(AActor* InRoot)const
+{
+	return !FindNameForActor(InRoot).IsNone();
 }
 
 void ULGUIScreenUISubsystem::RegisterUI(FName InName, AActor* InRoot, int32 InSortOrder)

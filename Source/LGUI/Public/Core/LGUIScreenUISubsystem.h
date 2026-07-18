@@ -12,6 +12,8 @@ class ULGUIPrefab;
  * Central registry for screen-space LGUI, the counterpart of UMG's viewport widget
  * management (plus a light menu stack in the spirit of CommonUI):
  *
+ * - AddToViewport / RemoveFromViewport: the plain UMG flow -- hand it a built root, it is
+ *   shown and managed, no name required (the builder's .AddToViewport() does this for you)
  * - named pages: ShowPrefab / RegisterUI, then GetUI / SetUIVisible / RemoveUI by name
  *   from anywhere, instead of every system keeping its own actor pointers
  * - RemoveAllUI = UMG's RemoveAllWidgets
@@ -27,10 +29,30 @@ class LGUI_API ULGUIScreenUISubsystem : public UWorldSubsystem
 	GENERATED_BODY()
 public:
 	static ULGUIScreenUISubsystem* Get(UWorld* InWorld);
+	/** Blueprint accessor: the screen UI subsystem for this context's world. */
+	UFUNCTION(BlueprintPure, meta = (WorldContext = "WorldContextObject", DisplayName = "Get LGUI Screen UI Subsystem"), Category = "LGUI")
+		static ULGUIScreenUISubsystem* GetLGUIScreenUISubsystem(UObject* WorldContextObject);
+
+	//--- UMG AddToViewport / RemoveFromParent parity: no name required ---
+	/**
+	 * Track an already-on-screen UI root (a LGUIBuilder result or a LoadPrefabToScreen'd
+	 * actor) so the subsystem manages its lifetime -- UMG's AddToViewport. No name needed;
+	 * tracked pages are torn down by RemoveAllUI and by level travel, like viewport widgets.
+	 * Re-adding an already-tracked root just re-applies the sort order.
+	 * @param InSortOrder When not 0, applied as the root's own canvas layer sort order.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "LGUI")
+		void AddToViewport(AActor* InRoot, int32 InSortOrder = 0);
+	/** Destroy the page and stop tracking it -- UMG's RemoveFromParent. No-op if not tracked. */
+	UFUNCTION(BlueprintCallable, Category = "LGUI")
+		void RemoveFromViewport(AActor* InRoot);
+	UFUNCTION(BlueprintCallable, Category = "LGUI")
+		bool IsInViewport(AActor* InRoot)const;
 
 	/**
 	 * Register a screen UI root actor under a name (e.g. a LGUIBuilder BuildToScreen result).
-	 * An existing entry with the same name is destroyed and replaced.
+	 * An existing entry with the same name is destroyed and replaced. Use this over
+	 * AddToViewport when you want to look the page up by name later.
 	 * @param InSortOrder When not 0, applied as the root's own canvas layer sort order.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "LGUI")
@@ -86,6 +108,11 @@ private:
 	/** Weak roots: a page destroyed behind our back just drops out on the next access. */
 	TMap<FName, FEntry> Entries;
 	TArray<FName> Stack;
+	/** Auto-name counter for nameless AddToViewport pages. */
+	int32 AutoNameCounter = 0;
+
+	/** Registered name of the entry whose root == InRoot, or NAME_None. */
+	FName FindNameForActor(AActor* InRoot)const;
 
 	/** Stack pages layer from here upward, above ordinary registered pages. */
 	static constexpr int32 StackBaseSortOrder = 1000;

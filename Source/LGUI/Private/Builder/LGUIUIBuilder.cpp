@@ -449,6 +449,19 @@ FBuiltUI FUINode::BuildToScreen(UWorld* InWorld, int32 InSortOrder)const
 	return Result;
 }
 
+FBuiltUI FUINode::AddToViewport(UWorld* InWorld, int32 InSortOrder)const
+{
+	FBuiltUI Result = BuildToScreen(InWorld, InSortOrder);
+	if (Result.Root != nullptr)
+	{
+		if (auto ScreenUISubsystem = ULGUIScreenUISubsystem::Get(InWorld))
+		{
+			ScreenUISubsystem->AddToViewport(Result.Root, InSortOrder);
+		}
+	}
+	return Result;
+}
+
 FBuiltUI FUINode::BuildToScreen(UWorld* InWorld, FName InScreenName, int32 InSortOrder)const
 {
 	FBuiltUI Result = BuildToScreen(InWorld, InSortOrder);
@@ -590,6 +603,14 @@ FUINode TextBlock(const FText& InText)
 	Node.Text(InText);
 	return Node;
 }
+
+FUINode TextBlock(const FString& InText)
+{
+	FUINode Node = Element(AUITextActor::StaticClass());
+	Node.Text(FText::FromString(InText));
+	return Node;
+}
+
 FUINode TextureImage(UTexture* InTexture)
 {
 	FUINode Node = Element(AUITextureActor::StaticClass());

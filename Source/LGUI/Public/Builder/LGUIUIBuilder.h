@@ -38,7 +38,7 @@ class UTexture;
  *           TextBlock(LOCTEXT("Confirm", "OK"))
  *       ]
  *   }]
- *   .BuildToScreen(GetWorld());   // AddToViewport-style; or .Build(World, ParentUIItem)
+ *   .AddToViewport(GetWorld());   // UMG-style; or .Build(World, ParentUIItem) for a sub-tree
  *
  *   UI.GetComponent<UUIText>(TEXT("Title"))->SetText(...);   // named lookup
  *
@@ -189,6 +189,13 @@ namespace LGUIBuilder
 		 * so the page is reachable by name from anywhere (GetUI / SetUIVisible / RemoveUI).
 		 */
 		FBuiltUI BuildToScreen(UWorld* InWorld, FName InScreenName, int32 InSortOrder)const;
+		/**
+		 * The plain UMG flow: build onto the screen AND hand the page to the screen UI
+		 * subsystem so its lifetime is managed (RemoveAllUI / level travel tear it down).
+		 * This is the one-call "put my UI on the viewport" entry -- prefer it over
+		 * BuildToScreen unless you deliberately want to own the page pointer yourself.
+		 */
+		FBuiltUI AddToViewport(UWorld* InWorld, int32 InSortOrder = 0)const;
 
 	private:
 		AActor* BuildInternal(UWorld* InWorld, USceneComponent* InParent, FBuiltUI& OutResult)const;
@@ -203,6 +210,7 @@ namespace LGUIBuilder
 	LGUI_API FUINode Image(ULGUISpriteData_BaseObject* InSprite = nullptr);
 	/** Text element (UMG: Text Block). */
 	LGUI_API FUINode TextBlock(const FText& InText);
+	LGUI_API FUINode TextBlock(const FString& InText);
 	/** Raw texture element. */
 	LGUI_API FUINode TextureImage(UTexture* InTexture = nullptr);
 	/** Instance of a prefab asset (buttons/sliders/your own composites). */

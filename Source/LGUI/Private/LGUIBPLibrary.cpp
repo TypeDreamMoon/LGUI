@@ -14,6 +14,7 @@
 #include "Event/InputModule/LGUI_StandaloneInputModule.h"
 #include "Components/InputComponent.h"
 #include "GameFramework/PlayerController.h"
+#include "Core/LGUIScreenUISubsystem.h"
 #include "EngineUtils.h"
 #include "UObject/UObjectIterator.h"
 #include "Framework/Application/SlateApplication.h"
@@ -154,6 +155,29 @@ AActor* ULGUIBPLibrary::LoadPrefabToScreen(UObject* WorldContextObject, ULGUIPre
 		Canvas->SetSortOrder(SortOrder, true);
 	}
 	return Actor;
+}
+
+AActor* ULGUIBPLibrary::AddPrefabToViewport(UObject* WorldContextObject, ULGUIPrefab* InPrefab, int32 SortOrder)
+{
+	AActor* Root = LoadPrefabToScreen(WorldContextObject, InPrefab, FLGUIPrefab_LoadPrefabCallback(), SortOrder);
+	if (Root != nullptr)
+	{
+		UWorld* World = GEngine->GetWorldFromContextObject(WorldContextObject, EGetWorldErrorMode::LogAndReturnNull);
+		if (auto ScreenUISubsystem = ULGUIScreenUISubsystem::Get(World))
+		{
+			ScreenUISubsystem->AddToViewport(Root, SortOrder);
+		}
+	}
+	return Root;
+}
+
+void ULGUIBPLibrary::RemoveFromViewport(UObject* WorldContextObject, AActor* InRoot)
+{
+	UWorld* World = GEngine->GetWorldFromContextObject(WorldContextObject, EGetWorldErrorMode::LogAndReturnNull);
+	if (auto ScreenUISubsystem = ULGUIScreenUISubsystem::Get(World))
+	{
+		ScreenUISubsystem->RemoveFromViewport(InRoot);
+	}
 }
 
 namespace LGUIBPLibraryLocal

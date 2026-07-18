@@ -80,6 +80,17 @@ public:
 	UFUNCTION(BlueprintCallable, meta = (AdvancedDisplay = "InCallbackBeforeAwake,SortOrder", UnsafeDuringActorConstruction = "true", WorldContext = "WorldContextObject", AutoCreateRefTerm = "InCallbackBeforeAwake"), Category = LGUI)
 		static AActor* LoadPrefabToScreen(UObject* WorldContextObject, ULGUIPrefab* InPrefab, const FLGUIPrefab_LoadPrefabCallback& InCallbackBeforeAwake, int32 SortOrder = 0);
 	/**
+	 * The plain UMG flow for a prefab, one call: LoadPrefabToScreen + hand the page to the
+	 * screen UI subsystem so its lifetime is managed (RemoveAllUI / level travel tear it
+	 * down) -- the CreateWidget+AddToViewport counterpart. Use RemoveFromViewport to close it.
+	 * @param SortOrder When not 0, the loaded root gets its own canvas layer with this sort order.
+	 */
+	UFUNCTION(BlueprintCallable, meta = (AdvancedDisplay = "SortOrder", UnsafeDuringActorConstruction = "true", WorldContext = "WorldContextObject"), Category = LGUI)
+		static AActor* AddPrefabToViewport(UObject* WorldContextObject, ULGUIPrefab* InPrefab, int32 SortOrder = 0);
+	/** Destroy an on-viewport UI root and stop tracking it -- UMG's RemoveFromParent. */
+	UFUNCTION(BlueprintCallable, meta = (WorldContext = "WorldContextObject"), Category = LGUI)
+		static void RemoveFromViewport(UObject* WorldContextObject, AActor* InRoot);
+	/**
 	 * LoadPrefab to create actor.
 	 * Awake function in LGUILifeCycleBehaviour and LGUIPrefabInterface will be called right after LoadPrefab is done.
 	 * @param InParent Parent scene component that the created root actor will be attached to. Can be null so the created root actor will not attach to anyone.
