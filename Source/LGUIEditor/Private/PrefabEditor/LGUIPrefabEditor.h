@@ -20,6 +20,7 @@ class ULGUIPrefabHelperObject;
 class ULGUIPrefabOverrideParameterHelperObject;
 class ULGUIPrefabOverrideHelperObject;
 struct FLGUISubPrefabData;
+namespace LGUIPrefabBehaviourUtils { struct FDiscoveredEvent; }
 
 /**
  * 
@@ -132,6 +133,13 @@ public:
 	 * needs no runtime lookup.
 	 */
 	void PromoteToBehaviourVariable(UObject* InTarget);
+	/**
+	 * UMG "Event +" counterpart: generate a signature-matching handler on the companion
+	 * behaviour blueprint (created on demand), wire the given event to it, and open the
+	 * blueprint at the new function. InEvent is one FLGUIEventDelegate discovered on a
+	 * selected actor's component (see LGUIPrefabBehaviourUtils::DiscoverEvents).
+	 */
+	void AddEventHandler(const LGUIPrefabBehaviourUtils::FDiscoveredEvent& InEvent);
 private:
 	/**
 	 * Shared entry guard for the behaviour workflow: refuses variant prefabs (root actor

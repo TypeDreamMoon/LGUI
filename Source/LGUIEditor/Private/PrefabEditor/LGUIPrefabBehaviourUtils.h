@@ -59,6 +59,26 @@ namespace LGUIPrefabBehaviourUtils
 	/** Variable name suggestion: actor label (or component name) cleaned to a valid identifier (CJK kept). */
 	FString MakeVariableNameForTarget(UObject* InTarget);
 
+	/** One FLGUIEventDelegate property found on a component -- an event that can get a handler. */
+	struct FDiscoveredEvent
+	{
+		class UActorComponent* Component = nullptr;
+		class FStructProperty* EventProperty = nullptr;
+		FString DisplayName;//e.g. "OnClick"
+	};
+	/** Every FLGUIEventDelegate UPROPERTY across InActor's components (UIButton.OnClick, UIToggle.OnToggle, ...). */
+	void DiscoverEvents(AActor* InActor, TArray<FDiscoveredEvent>& OutEvents);
+
+	/**
+	 * UMG "Event +" counterpart: generate a handler function on the behaviour blueprint whose
+	 * signature matches the event's native parameter (OnClick -> no args, OnToggle -> bool,
+	 * OnValueChange -> double, ...), compile, then wire InEvent's FLGUIEventDelegate to call it
+	 * on the behaviour instance. When the parameter type can't be mapped to a blueprint pin the
+	 * handler is generated parameterless (the binding still fires, just without the value).
+	 * @return the generated function name (NAME_None on failure); OutMessage carries the reason.
+	 */
+	FName AddEventHandler(UBlueprint* InBlueprint, AActor* InPrefabRootActor, const FDiscoveredEvent& InEvent, FText& OutMessage);
+
 	/**
 	 * Editor-time counterpart of UMG's BindWidget, materialized into serialized references:
 	 * for every Instance-Editable blueprint-declared null object property on the root actor's

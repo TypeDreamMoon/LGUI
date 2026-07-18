@@ -24,6 +24,7 @@
 #include "Core/ActorComponent/UIItem.h"
 #include "Core/LGUILifeCycleBehaviour.h"
 #include "Styling/SlateIconFinder.h"
+#include "LGUIPrefabBehaviourUtils.h"
 #include "LGUIPrefabEditorCommand.h"
 #include "Framework/Commands/GenericCommands.h"
 #include "Framework/MultiBox/MultiBoxBuilder.h"
@@ -197,9 +198,14 @@ public:
 			// UMG "Is Variable" counterpart: bind the selected element (actor or one of its
 			// components) to a member variable on the prefab's companion behaviour blueprint
 			AActor* SelectedActor = PrefabEditor->GetCurrentSelectedActor();
-			if (SelectedActor != nullptr
-				&& !FLGUIPrefabEditor::ActorIsRootAgent(SelectedActor)
-				&& SelectedActor != PrefabEditor->GetPrefabManagerObject()->LoadedRootActor)
+			const bool bSelectionValidForBehaviour = SelectedActor != nullptr
+				&& !FLGUIPrefabEditor::ActorIsRootAgent(SelectedActor);
+			// Promote excludes the prefab root (a variable to itself is meaningless); Event
+			// handlers do NOT -- a prefab whose root IS the interactive element (root
+			// UIButton.OnClick) is a common case that must be wireable.
+			const bool bSelectionIsPromotable = bSelectionValidForBehaviour
+				&& SelectedActor != PrefabEditor->GetPrefabManagerObject()->LoadedRootActor;
+			if (bSelectionIsPromotable)
 			{
 				MenuBuilder.AddSubMenu(
 					LOCTEXT("PromoteSubMenu", "Promote to Behaviour Variable"),
@@ -236,6 +242,40 @@ public:
 							AddTargetEntry(Actor, FText::Format(LOCTEXT("PromoteAsActor", "As Actor ({0})")
 								, Actor->GetClass()->GetDisplayNameText()));
 						}));
+			}
+
+			// UMG "Event +" counterpart: generate a handler on the companion behaviour
+			// blueprint and wire an event (OnClick / OnToggle / ...) to it. Shown whenever the
+			// selection has LGUIEventDelegate events -- including the prefab root itself.
+			if (bSelectionValidForBehaviour)
+			{
+				TArray<LGUIPrefabBehaviourUtils::FDiscoveredEvent> DiscoveredEvents;
+				LGUIPrefabBehaviourUtils::DiscoverEvents(SelectedActor, DiscoveredEvents);
+				if (DiscoveredEvents.Num() > 0)
+				{
+					MenuBuilder.AddSubMenu(
+						LOCTEXT("AddEventSubMenu", "Add Event Handler"),
+						LOCTEXT("AddEventSubMenuTooltip", "Generate a handler function on this prefab's behaviour blueprint (created on demand) and wire the selected element's event to it, then jump to it -- UMG's event \"+\"."),
+						FNewMenuDelegate::CreateLambda([WeakEditor = PrefabEditorPtr, DiscoveredEvents](FMenuBuilder& SubMenu)
+							{
+								for (const auto& Event : DiscoveredEvents)
+								{
+									if (Event.Component == nullptr)continue;
+									SubMenu.AddMenuEntry(
+										FText::Format(LOCTEXT("AddEventEntry", "{0} ({1})")
+											, FText::FromString(Event.DisplayName), FText::FromString(Event.Component->GetClass()->GetName())),
+										FText::Format(LOCTEXT("AddEventEntryTooltip", "Create a handler for {0} on the behaviour blueprint and bind it."), FText::FromString(Event.DisplayName)),
+										FSlateIcon(FAppStyle::GetAppStyleSetName(), "Icons.Plus"),
+										FUIAction(FExecuteAction::CreateLambda([WeakEditor, Event]()
+											{
+												if (auto Editor = WeakEditor.Pin())
+												{
+													Editor->AddEventHandler(Event);
+												}
+											})));
+								}
+							}));
+				}
 			}
 		}
 		MenuBuilder.EndSection();

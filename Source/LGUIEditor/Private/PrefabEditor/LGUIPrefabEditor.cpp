@@ -10,6 +10,8 @@
 #include "SLGUIPrefabPalette.h"
 #include "LGUIPrefabBehaviourUtils.h"
 #include "Subsystems/AssetEditorSubsystem.h"
+#include "Kismet2/KismetEditorUtilities.h"
+#include "EdGraph/EdGraph.h"
 #include "UnrealEdGlobals.h"
 #include "EditorModeManager.h"
 #include "EngineUtils.h"
@@ -1322,6 +1324,50 @@ void FLGUIPrefabEditor::PromoteToBehaviourVariable(UObject* InTarget)
 		Info.Image = FAppStyle::GetBrush(TEXT("Icons.WarningWithColor"));
 	}
 	FSlateNotificationManager::Get().AddNotification(Info);
+}
+
+void FLGUIPrefabEditor::AddEventHandler(const LGUIPrefabBehaviourUtils::FDiscoveredEvent& InEvent)
+{
+	if (InEvent.Component == nullptr)return;
+	// a component inside a sub prefab serializes as a prefab reference + recorded overrides
+	// only; a binding written directly here is not recorded as an override, so it is reverted
+	// on Apply. Refuse instead of silently losing the wiring.
+	if (ActorBelongsToSubPrefab(InEvent.Component->GetOwner()))
+	{
+		FMessageDialog::Open(EAppMsgType::Ok, LOCTEXT("Error_EventOnSubPrefab", "This element belongs to a sub prefab, so an event wired here would not be saved. Open the source prefab and wire the event there."));
+		return;
+	}
+	UBlueprint* Blueprint = GetOrCreateBehaviourBlueprintChecked();
+	if (Blueprint == nullptr)return;
+	AActor* RootActor = PrefabHelperObject->LoadedRootActor.Get();
+
+	FText Message;
+	const FName HandlerName = LGUIPrefabBehaviourUtils::AddEventHandler(Blueprint, RootActor, InEvent, Message);
+	const bool bSuccess = !HandlerName.IsNone();
+	if (bSuccess)
+	{
+		PrefabHelperObject->SetAnythingDirty();
+	}
+	FNotificationInfo Info(Message);
+	Info.ExpireDuration = 5.0f;
+	if (!bSuccess)
+	{
+		Info.Image = FAppStyle::GetBrush(TEXT("Icons.WarningWithColor"));
+	}
+	FSlateNotificationManager::Get().AddNotification(Info);
+
+	if (bSuccess)
+	{
+		// open the blueprint at the generated function graph, UMG "+" style
+		if (UEdGraph* FuncGraph = FindObject<UEdGraph>(Blueprint, *HandlerName.ToString()))
+		{
+			FKismetEditorUtilities::BringKismetToFocusAttentionOnObject(FuncGraph, false);
+		}
+		else
+		{
+			GEditor->GetEditorSubsystem<UAssetEditorSubsystem>()->OpenEditorForAsset(Blueprint);
+		}
+	}
 }
 
 void FLGUIPrefabEditor::OnOpenRawDataViewerPanel()

@@ -937,6 +937,44 @@ bool FLGUIEventDelegate::CheckFunctionParameter()const
 	}
 	return true;
 }
+bool FLGUIEventDelegate::HasFunctionBinding(UActorComponent* InTargetComponent, FName InFunctionName)const
+{
+	for (auto& item : eventList)
+	{
+		if (item.TargetObject == InTargetComponent && item.functionName == InFunctionName)
+		{
+			return true;
+		}
+	}
+	return false;
+}
+FName FLGUIEventDelegate::FindFunctionBoundToComponent(UActorComponent* InTargetComponent)const
+{
+	for (auto& item : eventList)
+	{
+		if (item.TargetObject == InTargetComponent && !item.functionName.IsNone())
+		{
+			return item.functionName;
+		}
+	}
+	return NAME_None;
+}
+void FLGUIEventDelegate::AddFunctionBinding(AActor* InHelperActor, UActorComponent* InTargetComponent, FName InFunctionName, ELGUIEventDelegateParameterType InParamType, bool bUseNativeParameter)
+{
+	if (InTargetComponent == nullptr)return;
+	// FLGUIEventDelegate is a friend of FLGUIEventDelegateData, so the helper fields the
+	// event customization normally fills in can be set directly here -- same result as
+	// picking the component + function in the details panel by hand.
+	FLGUIEventDelegateData Data;
+	Data.HelperActor = InHelperActor;
+	Data.HelperClass = InTargetComponent->GetClass();
+	Data.HelperComponentName = InTargetComponent->GetFName();
+	Data.TargetObject = InTargetComponent;
+	Data.functionName = InFunctionName;
+	Data.ParamType = InParamType;
+	Data.UseNativeParameter = bUseNativeParameter;
+	eventList.Add(Data);
+}
 #endif
 
 #undef LOCTEXT_NAMESPACE

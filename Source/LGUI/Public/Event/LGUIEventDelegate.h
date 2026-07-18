@@ -205,5 +205,20 @@ public:
 	 * @return	true- is compatible, false- not
 	 */
 	bool CheckFunctionParameter()const;
+
+	/** This event's native parameter type (the value it fires with). */
+	ELGUIEventDelegateParameterType GetSupportParameterType()const { return supportParameterType; }
+	/**
+	 * Editor: append a binding that calls InTargetComponent's InFunctionName, wiring all the
+	 * helper fields so the binding survives serialization and displays correctly in the
+	 * event customization -- the programmatic counterpart of picking a function in the UI.
+	 * Used by the prefab editor's UMG-style "Add Event Handler" (Event "+").
+	 * @param bUseNativeParameter Pass this event's fired value straight to the handler.
+	 */
+	void AddFunctionBinding(AActor* InHelperActor, class UActorComponent* InTargetComponent, FName InFunctionName, ELGUIEventDelegateParameterType InParamType, bool bUseNativeParameter);
+	/** True when any binding already targets InTargetComponent's InFunctionName. */
+	bool HasFunctionBinding(class UActorComponent* InTargetComponent, FName InFunctionName)const;
+	/** Function name of the first binding targeting InTargetComponent, or NAME_None (for "reuse the existing handler"). */
+	FName FindFunctionBoundToComponent(class UActorComponent* InTargetComponent)const;
 #endif
 };
