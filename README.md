@@ -1,3 +1,7 @@
+> [!IMPORTANT]
+> 当前分支与上游差异过大(Layout, Editor)，目前停止维护 请移步至[DreamGUI](https://github.com/TypeDreamMoon/DreamGUI)获取最新版本
+
+
 <p align="center">
   <img width="112" src="./Resources/Icon128.png" alt="LGUI logo">
 </p>
